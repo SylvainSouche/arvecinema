@@ -6,11 +6,11 @@
   "author": "ArveCinema contributors",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sylvain/arvecinema.git"
+    "url": "https://github.com/SylvainSouche/arvecinema.git"
   },
-  "homepage": "https://github.com/sylvain/arvecinema",
+  "homepage": "https://github.com/SylvainSouche/arvecinema",
   "bugs": {
-    "url": "https://github.com/sylvain/arvecinema/issues"
+    "url": "https://github.com/SylvainSouche/arvecinema/issues"
   },
   "keywords": [
     "electron",
