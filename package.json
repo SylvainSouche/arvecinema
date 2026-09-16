@@ -1,26 +1,6 @@
 {
   "name": "arvecinema",
-  "version": "0.2.10",
-  "description": "Cinema showtimes app for the Arve Valley (Sallanches, Cluses, Bonneville, Chamonix)",
-  "license": "BSD-3-Clause",
-  "author": "ArveCinema contributors",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/sylvain/arvecinema.git"
-  },
-  "homepage": "https://github.com/sylvain/arvecinema",
-  "bugs": {
-    "url": "https://github.com/sylvain/arvecinema/issues"
-  },
-  "keywords": [
-    "electron",
-    "cinema",
-    "showtimes",
-    "mont-blanc",
-    "arve",
-    "allocine",
-    "wikidata"
-  ],
+  "version": "0.2.1",
   "private": true,
   "main": "./out/main/index.js",
   "scripts": {
@@ -31,61 +11,38 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "format": "prettier --write \"src/**/*.{ts,tsx,html,css,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,html,css,json}\"",
-    "package": "electron-vite build && electron-builder",
-    "package:dir": "electron-vite build && electron-builder --dir",
-    "package:dmg": "electron-vite build && electron-builder --mac dmg",
-    "package:zip": "electron-vite build && electron-builder --mac zip"
+    "bump": "node -e \"const p=require('./package.json');const v=p.version.split('.');v[2]=String(Number(v[2])+1);require('fs').writeFileSync('./package.json',JSON.stringify({...p,version:v.join('.')},null,2)+'\\n');console.log('Version bumped to '+v.join('.'))\"",
+    "package": "npm run bump && electron-vite build && electron-builder",
+    "package:dir": "npm run bump && electron-vite build && electron-builder --dir",
+    "package:dmg": "npm run bump && electron-vite build && electron-builder --mac dmg",
+    "package:zip": "npm run bump && electron-vite build && electron-builder --mac zip"
   },
   "build": {
     "appId": "fr.arvecinema.app",
     "productName": "ArveCinema",
-    "directories": {
-      "output": "dist"
-    },
-    "files": [
-      "out/**/*",
-      "package.json"
-    ],
+    "directories": { "output": "dist" },
+    "files": ["out/**/*", "package.json"],
     "mac": {
       "icon": "build/icon.icns",
       "category": "public.app-category.entertainment",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
+        { "target": "dmg", "arch": ["x64", "arm64"] },
+        { "target": "zip", "arch": ["x64", "arm64"] }
       ]
     },
     "win": {
       "icon": "build/icon.ico",
-      "target": [
-        "nsis"
-      ]
+      "target": ["nsis"]
     },
     "linux": {
       "icon": "build/icon-512.png",
-      "target": [
-        "AppImage"
-      ],
+      "target": ["AppImage"],
       "category": "AudioVideo"
     },
     "extraResources": [
-      {
-        "from": "build/icon.png",
-        "to": "icon.png"
-      }
+      { "from": "build/icon.png", "to": "icon.png" }
     ]
   },
   "dependencies": {

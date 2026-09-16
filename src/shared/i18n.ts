@@ -66,6 +66,20 @@ export type TranslationKey =
   | 'openRt'
   | 'certifiedFresh'
   | 'rottenTomatoes'
+  | 'settings'
+  | 'settingsTitle'
+  | 'settingsDesc'
+  | 'apiKey'
+  | 'username'
+  | 'subscriptionKey'
+  | 'save'
+  | 'cancel'
+  | 'testing'
+  | 'saveAndTest'
+  | 'valid'
+  | 'invalid'
+  | 'noCredentials'
+  | 'close'
   | 'searchPlaceholder'
   | 'today'
   | 'language'
@@ -118,6 +132,20 @@ export const TRANSLATIONS: Translations = {
   openRt:           { fr: 'Cliquez pour ouvrir la fiche RT', en: 'Click to open RT page' },
   certifiedFresh:   { fr: '🍅 Certified Fresh', en: '🍅 Certified Fresh' },
   rottenTomatoes:   { fr: 'Rotten Tomatoes', en: 'Rotten Tomatoes' },
+  settings:          { fr: 'Réglages', en: 'Settings' },
+  settingsTitle:     { fr: 'Réglages', en: 'Settings' },
+  settingsDesc:      { fr: 'Pour afficher les notes des films, configurez vos identifiants', en: 'To display film ratings, configure your credentials' },
+  apiKey:            { fr: 'Clé API', en: 'API Key' },
+  username:          { fr: "Nom d'utilisateur", en: 'Username' },
+  subscriptionKey:   { fr: "Clé d'abonnement", en: 'Subscription key' },
+  save:              { fr: 'Enregistrer', en: 'Save' },
+  cancel:            { fr: 'Annuler', en: 'Cancel' },
+  testing:           { fr: 'Test…', en: 'Testing…' },
+  saveAndTest:       { fr: 'Enregistrer et tester', en: 'Save and test' },
+  valid:             { fr: 'Credentials valides', en: 'Valid credentials' },
+  invalid:           { fr: 'Échec de la requête (vérifiez vos credentials)', en: 'Request failed (check your credentials)' },
+  noCredentials:     { fr: 'Aucun credential configuré', en: 'No credentials configured' },
+  close:             { fr: 'Fermer', en: 'Close' },
   searchPlaceholder: { fr: 'Rechercher : titre, réalisateur, acteur…', en: 'Search: title, director, actor…' },
   today:             { fr: "Aujourd'hui", en: 'Today' },
   language:          { fr: 'Langue', en: 'Language' },

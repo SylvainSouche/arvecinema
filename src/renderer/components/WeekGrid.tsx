@@ -63,10 +63,9 @@ const POSTER_W = 44;
 const POSTER_H = 66;
 const SCROLLBAR_RESERVE = 16;       // px — reserve room so scrollbar doesn't overlap last row
 
-/** Background colors for the two hour zones of each day strip.
- *  Uses CSS variables so they adapt to the theme. */
-const COLOR_CONTEXT = 'var(--bg-strip-dim)';    // dim — hours outside slider range
-const COLOR_IN_RANGE = 'var(--bg-strip-active)'; // brighter — hours inside slider range
+/** Background colors for the two hour zones of each day strip. */
+const COLOR_CONTEXT = '#0a0a0a';   // dim — hours outside slider range
+const COLOR_IN_RANGE = '#141414';  // brighter — hours inside slider range
 
 /** Hour padding around the slider for the display window. */
 const DISPLAY_PADDING_HOURS = 2;
@@ -97,27 +96,40 @@ export const WeekGrid: React.FC<Props> = ({
   const displayMin = Math.max(hourFloor, hourMin - DISPLAY_PADDING_HOURS);
   const displayMax = Math.min(hourCeil, hourMax + DISPLAY_PADDING_HOURS);
 
-  // All hour columns from floor(displayMin) to floor(displayMax) INCLUSIVE.
-  // The header renders one cell per integer hour. The day strip has the
-  // SAME width as the header so they align perfectly: both use
-  // hours.length × HOUR_COL_WIDTH.
+  // All hour columns from floor(displayMin) to floor(displayMax) INCLUSIVE —
+  // these are label positions, NOT intervals. We use them to draw the visual
+  // grid + render the "10h, 11h, ..." labels.
   const hours: number[] = [];
   for (let h = Math.floor(displayMin); h <= Math.floor(displayMax); h++) hours.push(h);
 
-  // The day strip width MUST equal the header width: hours.length × HOUR_COL_WIDTH.
-  // NOT displaySpan × HOUR_COL_WIDTH (which would be off by one because
-  // hours.length counts boundaries, displaySpan counts intervals).
-  const dayStripWidth = hours.length * HOUR_COL_WIDTH;
+  // Guard against zero displaySpan (would produce NaN in hourToX). 0.25h
+  // minimum keeps the math defined even if min == max (shouldn't happen
+  // because DoubleRangeSlider prevents it, but WeekGrid takes raw props).
+  const displaySpan = Math.max(0.25, displayMax - displayMin);
+
+  // ── Coordinate system (single source of truth) ────────────────────────────
+  //
+  // CRITICAL: the day-strip width and the hour-to-pixel mapping MUST agree,
+  // otherwise chips drift relative to the hour header. The previous code used
+  //   dayStripWidth = hours.length × HOUR_COL_WIDTH   ← counts hour BOUNDARIES
+  //   hourToX(h)    = (h - displayMin) / displaySpan × dayStripWidth
+  //                                                                ↑ uses intervals
+  // Those two coordinate systems disagree by one hour, so chips drifted.
+  //
+  // Now both use the SAME math:
+  //   dayStripWidth = displaySpan × HOUR_COL_WIDTH
+  //   hourToX(h)    = (h - displayMin) × HOUR_COL_WIDTH
+  // Both treat HOUR_COL_WIDTH as "pixels per hour of duration" and use the
+  // CONTINUOUS hour span (displayMax - displayMin), not the discrete label count.
+  //
+  const dayStripWidth = displaySpan * HOUR_COL_WIDTH;
 
   /** Convert an hour float to a pixel offset within a day strip. */
-  const hourToX = (h: number) => (h - Math.floor(displayMin)) * HOUR_COL_WIDTH;
+  const hourToX = (h: number) => (h - displayMin) * HOUR_COL_WIDTH;
 
   // Background gradient: 3-stop — context | in-range | context.
-  // Use the SAME coordinate system as hourToX: floor(displayMin) based.
-  const stripDisplayMin = Math.floor(displayMin);
-  const stripSpan = hours.length;   // same as dayStripWidth / HOUR_COL_WIDTH
-  const inRangeLeftPct  = ((matchMin - stripDisplayMin) / stripSpan) * 100;
-  const inRangeRightPct = ((matchMax - stripDisplayMin) / stripSpan) * 100;
+  const inRangeLeftPct  = ((matchMin - displayMin) / displaySpan) * 100;
+  const inRangeRightPct = ((matchMax - displayMin) / displaySpan) * 100;
   const stripBackground = `linear-gradient(to right,
     ${COLOR_CONTEXT} 0%, ${COLOR_CONTEXT} ${inRangeLeftPct}%,
     ${COLOR_IN_RANGE} ${inRangeLeftPct}%, ${COLOR_IN_RANGE} ${inRangeRightPct}%,
@@ -257,71 +269,25 @@ export const WeekGrid: React.FC<Props> = ({
                       <div key={h} style={{
                         width: HOUR_COL_WIDTH,
                         flex: `0 0 ${HOUR_COL_WIDTH}px`,
-                        position: 'relative',
-                        background: inRange ? 'var(--bg-strip-active)' : 'var(--bg-strip-dim)',
+                        padding: '10px 0',
+                        textAlign: 'center',
+                        fontSize: 11,
+                        fontWeight: hi === 0 ? 700 : (inRange ? 600 : 400),
+                        color: hi === 0 ? '#fff' : (inRange ? '#bbb' : '#444'),
+                        borderLeft: hi === 0 ? '3px solid var(--text-muted)' : '1px solid var(--border-light)',
                         borderBottom: '1px solid var(--border-light)',
+                        background: inRange ? '#181818' : '#0a0a0a',
                       }}>
-                        {/* Day label in the first column */}
                         {hi === 0 && (
                           <div style={{
                             fontSize: 11, color: 'var(--text-primary)',
                             textTransform: 'capitalize' as const,
-                            fontWeight: 700,
-                            padding: '6px 0 2px',
-                            textAlign: 'center',
+                            marginBottom: 2, fontWeight: 700,
                           }}>
                             {weekday} {dayNum}
                           </div>
                         )}
-                        {/* Hour label — positioned at the LEFT edge of the cell
-                            (over the tick line), shifted left by half its width
-                            so it sits centered above the boundary, not in the
-                            middle of the cell. */}
-                        <div style={{
-                          position: 'absolute',
-                          bottom: '10px',
-                          left: 0,
-                          transform: 'translateX(-50%)',
-                          fontSize: 11,
-                          fontWeight: inRange ? 600 : 400,
-                          color: inRange ? 'var(--text-secondary)' : 'var(--text-faint)',
-                          whiteSpace: 'nowrap',
-                        }}>
-                          {h}h
-                        </div>
-                        {/* Vertical tick line — full height of the cell, at the left edge */}
-                        <div style={{
-                          position: 'absolute',
-                          top: 0,
-                          bottom: 0,
-                          left: 0,
-                          width: hi === 0 ? 3 : 1,
-                          background: hi === 0 ? 'var(--text-muted)' : 'var(--border-light)',
-                        }} />
-                        {/* Last hour also needs a right-edge tick + label */}
-                        {hi === hours.length - 1 && (
-                          <>
-                            <div style={{
-                              position: 'absolute',
-                              top: 0, bottom: 0,
-                              right: 0,
-                              width: 1,
-                              background: 'var(--border-light)',
-                            }} />
-                            <div style={{
-                              position: 'absolute',
-                              bottom: '10px',
-                              right: 0,
-                              transform: 'translateX(50%)',
-                              fontSize: 11,
-                              fontWeight: inRange ? 600 : 400,
-                              color: inRange ? 'var(--text-secondary)' : 'var(--text-faint)',
-                              whiteSpace: 'nowrap',
-                            }}>
-                              {h + 1}h
-                            </div>
-                          </>
-                        )}
+                        <div>{h}h</div>
                       </div>
                     );
                   })}
@@ -504,7 +470,7 @@ const WeekRow: React.FC<WeekRowProps> = ({
                 borderBottom: '1px solid var(--border-light)',
                 borderLeft: dayIdx === 0 ? '3px solid var(--border-light)' : '1px solid var(--border-light)',
                 background: stripBackground,
-                overflow: 'visible',   // let chips extend beyond the strip
+                overflow: 'hidden',
               }}
             >
               {/* Hour gridlines (faint vertical lines at each integer hour) */}
@@ -531,6 +497,7 @@ const WeekRow: React.FC<WeekRowProps> = ({
                   runtimeHours={runtimeHours}
                   runtimeMinutes={movie.runtime}
                   hourToX={hourToX}
+                  dayStripWidth={dayStripWidth}
                 />
               ))}
             </div>
@@ -552,6 +519,7 @@ interface ShowtimeChipProps {
   runtimeHours: number;
   runtimeMinutes?: number;
   hourToX: (h: number) => number;
+  dayStripWidth: number;
 }
 
 /** Hide the VF/VO badge on very narrow chips so the time stays readable. */
@@ -561,7 +529,7 @@ const MIN_CHIP_WIDTH = 36;
 
 const ShowtimeChip: React.FC<ShowtimeChipProps> = ({
   showtime, cinemaName, color, runtimeHours, runtimeMinutes,
-  hourToX,
+  hourToX, dayStripWidth,
 }) => {
   const startX = hourToX(showtime.hour);
   const v = showtimeVersion(showtime.tags);
@@ -569,12 +537,13 @@ const ShowtimeChip: React.FC<ShowtimeChipProps> = ({
   // Use the showtime's own hour for display, NOT the chip's start position.
   const displayTime = formatTime(showtime.time);
 
-  // Chip width = real duration, NOT clamped to the day strip width.
-  // The chip extends to its real end time even if it overflows past the
-  // last hour column. The container has overflow:visible (not hidden) so
-  // the chip is fully visible.
+  // Chip width = real duration (NOT clamped to displayMax).
+  // The hour filter determines which MOVIES are shown, but once a movie
+  // is visible, its chip extends to the real end time. If it goes beyond
+  // the day strip, it's visually clipped by overflow:hidden on the container.
   const realEndX = hourToX(showtime.hour + runtimeHours);
-  const width = Math.max(MIN_CHIP_WIDTH, realEndX - startX - 2);
+  const naturalWidth = Math.max(MIN_CHIP_WIDTH, realEndX - startX - 2);
+  const width = Math.min(naturalWidth, dayStripWidth - startX - 2);
 
   return (
     <button

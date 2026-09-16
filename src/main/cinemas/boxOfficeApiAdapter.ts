@@ -1,5 +1,4 @@
 import type { CinemaAdapter, Movie, Showtime } from './types';
-import { APP_USER_AGENT } from '../../shared/userAgent';
 import { isVFTags, isVOTags, TIMEZONE } from './types';
 import { toIsoDay, parseShowtimeDate } from '../../shared/cinema';
 import { fetchWithTimeout, REQUEST_TIMEOUT_MS } from '../../shared/fetchWithTimeout';
@@ -33,7 +32,7 @@ const HEADERS: Record<string, string> = {
   // NET-01: identify the app honestly rather than impersonating Safari.
   // A cinema site operator seeing unusual traffic can find us instead of
   // blocking the UA outright.
-  'User-Agent': APP_USER_AGENT,
+  'User-Agent': 'ArveCinema/1.0.0 (+https://github.com/local/arvecinema)',
 };
 
 /** Build per-cinema headers: the Referer must point at THIS cinema's origin,

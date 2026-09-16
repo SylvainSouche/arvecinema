@@ -1,5 +1,4 @@
 import { browserFetch } from './browserFetch';
-import { APP_USER_AGENT } from '../../shared/userAgent';
 import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
@@ -30,7 +29,7 @@ export async function fetchImdbRating(imdbId: string): Promise<ImdbResult | null
   try {
     const html = await browserFetch(url, {
       headers: {
-        'User-Agent': APP_USER_AGENT,
+        'User-Agent': 'ArveCinema/1.0.0 (cinema schedule app; +https://github.com/local/arvecinema)',
       },
     });
 

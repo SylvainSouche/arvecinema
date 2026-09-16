@@ -37,15 +37,12 @@ export async function browserFetch(
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      // DON'T disable images — Cloudflare detects this as bot behavior.
       images: true,
+      // DON'T disable JavaScript — needed for Cloudflare challenge.
       javascript: true,
     },
   });
-
-  // Harden the hidden window: deny all window-open + permission requests.
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  ses.setPermissionRequestHandler(() => false);
-  ses.setPermissionCheckHandler(() => false);
 
   try {
     if (DEBUG) console.log(`[browserFetch] → loading ${url}`);

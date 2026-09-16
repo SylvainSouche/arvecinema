@@ -1,5 +1,4 @@
 import { pooledFetch } from '../../shared/connectionPool';
-import { APP_USER_AGENT } from '../../shared/userAgent';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Rotten Tomatoes scraper — press Tomatometer only.
@@ -8,7 +7,7 @@ import { APP_USER_AGENT } from '../../shared/userAgent';
 // ──────────────────────────────────────────────────────────────────────────
 
 const RT_BASE = 'https://www.rottentomatoes.com';
-const RT_UA = APP_USER_AGENT;
+const RT_UA = 'ArveCinema/1.0.0 (+https://github.com/local/arvecinema)';
 
 const HEADERS: Record<string, string> = {
   'User-Agent': RT_UA,

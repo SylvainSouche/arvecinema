@@ -1,5 +1,4 @@
 import * as cheerio from 'cheerio';
-import { APP_USER_AGENT } from '../../shared/userAgent';
 import type { CinemaAdapter, Movie, Showtime } from './types';
 import { WEEKDAY_FR } from '../../shared/cinema';
 import { toIsoDay } from '../../shared/cinema';
@@ -57,7 +56,7 @@ export interface CineChateauConfig {
 
 const HEADERS: Record<string, string> = {
   Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-  'User-Agent': APP_USER_AGENT,
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
 };
 
 /** Placeholder used when the page doesn't expose a value. */
@@ -65,15 +64,13 @@ const UNKNOWN = 'Non spécifié';
 
 // ── Parsers ────────────────────────────────────────────────────────────────
 
-/** Parse "14h00" / "14h" / "14:00" → hour float (14.0). Returns null on parse failure
- *  or out-of-range values. */
+/** Parse "14h00" / "14h" / "14:00" → hour float (14.0). Returns null on parse failure. */
 const parseHour = (s: string): number | null => {
   const m = s.trim().match(/^(\d{1,2})\s*[h:]\s*(\d{0,2})$/i);
   if (!m) return null;
   const h = Number(m[1]);
   const min = m[2] ? Number(m[2]) : 0;
   if (Number.isNaN(h) || Number.isNaN(min)) return null;
-  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
   return h + min / 60;
 };
 
@@ -239,13 +236,13 @@ export function createCineChateauAdapter(
         REQUEST_TIMEOUT_MS,
       );
       if (!res.ok) throw new Error(`${cinemaId}: HTTP ${res.status}`);
-      // Consume the response body as ArrayBuffer ONCE, then decode.
-      // cinechateau.fr is served as ISO-8859-1. If we decode as UTF-8,
-      // accented characters become replacement chars (�). Detect and
-      // re-decode from the same bytes.
-      const buf = await res.arrayBuffer();
-      let html = new TextDecoder('utf-8').decode(buf);
+      let html = await res.text();
+      // cinechateau.fr is served as ISO-8859-1. If the fetch decoded it as
+      // UTF-8 (wrong), accented characters become replacement chars (�).
+      // Re-decode from the raw bytes.
       if (html.includes('\uFFFD')) {
+        const buf = await fetch(`${cfg.baseUrl}${schedulePath}`, { headers: HEADERS })
+          .then(r => r.arrayBuffer());
         html = new TextDecoder('iso-8859-1').decode(buf);
       }
       const $ = cheerio.load(html);
