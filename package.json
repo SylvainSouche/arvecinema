@@ -1,0 +1,107 @@
+{
+  "name": "arvecinema",
+  "version": "0.2.10",
+  "description": "Cinema showtimes app for the Arve Valley (Sallanches, Cluses, Bonneville, Chamonix)",
+  "license": "BSD-3-Clause",
+  "author": "ArveCinema contributors",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sylvain/arvecinema.git"
+  },
+  "homepage": "https://github.com/sylvain/arvecinema",
+  "bugs": {
+    "url": "https://github.com/sylvain/arvecinema/issues"
+  },
+  "keywords": [
+    "electron",
+    "cinema",
+    "showtimes",
+    "mont-blanc",
+    "arve",
+    "allocine",
+    "wikidata"
+  ],
+  "private": true,
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "debug": "ARVE_DEBUG=1 electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "format": "prettier --write \"src/**/*.{ts,tsx,html,css,json}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,html,css,json}\"",
+    "package": "electron-vite build && electron-builder",
+    "package:dir": "electron-vite build && electron-builder --dir",
+    "package:dmg": "electron-vite build && electron-builder --mac dmg",
+    "package:zip": "electron-vite build && electron-builder --mac zip"
+  },
+  "build": {
+    "appId": "fr.arvecinema.app",
+    "productName": "ArveCinema",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.entertainment",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "icon": "build/icon-512.png",
+      "target": [
+        "AppImage"
+      ],
+      "category": "AudioVideo"
+    },
+    "extraResources": [
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      }
+    ]
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3",
+    "electron-vite": "^2.0.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.3.0",
+    "vite": "^5.0.0"
+  }
+}
