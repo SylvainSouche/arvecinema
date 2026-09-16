@@ -217,14 +217,30 @@ function createWindow() {
   // renderer induced to run `location.href = 'https://evil.example'` would
   // navigate the main window off your local content, and that remote page
   // then inherits a BrowserWindow with your preload attached.
+  //
+  // In packaged builds, only the built renderer index.html is a valid
+  // file:// target. In dev, the vite dev server origin is allowed.
   const allowedOrigins = new Set<string>();
   if (devUrl) {
     try { allowedOrigins.add(new URL(devUrl).origin); } catch { /* ignore */ }
   }
+  const allowedFileUrl = path.join(__dirname, '../renderer/index.html');
+  const isAllowedFile = (url: string): boolean => {
+    if (!url.startsWith('file://')) return false;
+    try {
+      // Decode file:// URL to a filesystem path for comparison.
+      const u = new URL(url);
+      // On Windows, pathname starts with /C:/... — strip leading slash before drive letter.
+      const fsPath = decodeURIComponent(u.pathname).replace(/^\/(?=[A-Za-z]:\/)/, '');
+      return path.resolve(fsPath) === path.resolve(allowedFileUrl);
+    } catch {
+      return false;
+    }
+  };
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    const isLocalFile = url.startsWith('file://');
+    if (isAllowedFile(url)) return;
     const isAllowedDev = allowedOrigins.has(safeOrigin(url));
-    if (!isLocalFile && !isAllowedDev) {
+    if (!isAllowedDev) {
       event.preventDefault();
       console.warn('[will-navigate] blocked:', url);
     }
@@ -242,9 +258,9 @@ function createWindow() {
       return { action: 'deny' };
     });
     contents.on('will-navigate', (event, url) => {
-      const isLocalFile = url.startsWith('file://');
+      if (isAllowedFile(url)) return;
       const isAllowedDev = allowedOrigins.has(safeOrigin(url));
-      if (!isLocalFile && !isAllowedDev) {
+      if (!isAllowedDev) {
         event.preventDefault();
         console.warn('[will-navigate] blocked in child contents:', url);
       }
@@ -303,6 +319,8 @@ app.on('window-all-closed', () => {
   // pool keep the event loop alive, so app.quit() alone isn't enough.
   // On macOS we also quit (unlike the typical pattern) because this app
   // has no reason to stay alive without a window.
-  app.quit();
-  process.exit(0);
+  // Use app.exit(0) rather than process.exit(0) so Electron's cleanup
+  // hooks (tray icon removal, dock icon reset, file handle flush) run
+  // before the process dies.
+  app.exit(0);
 });

@@ -90,8 +90,19 @@ export async function pooledFetch(url: string, opts: FetchOptions = {}): Promise
     const text = await res.text();
     debug(`← HTTP ${res.status} in ${elapsedMs}ms (${text.length} bytes)`);
 
-    // Detect Cloudflare challenge
-    if (text.includes('Just a moment...') || text.includes('cf-challenge') || text.length < 500) {
+    // Detect Cloudflare challenge. Cloudflare's "Just a moment..." interstitial
+    // page is small (typically ~3-5 KB of obfuscated JS), but legitimate pages
+    // can also be short (e.g. a 204 No Content or a tiny redirect stub). Using a
+    // 500-byte threshold produced false positives on small but valid responses.
+    // We now trigger on the explicit Cloudflare markers AND a very low floor
+    // (<200 bytes, which is essentially "empty" — no real HTML page is that small).
+    const isCloudflareChallenge =
+      text.includes('Just a moment...') ||
+      text.includes('cf-challenge') ||
+      text.includes('challenge-platform') ||
+      text.includes('cf-browser-verification') ||
+      text.length < 200;
+    if (isCloudflareChallenge) {
       debug(`⚠ ${domain}: Cloudflare challenge detected (${text.length} bytes)`);
       throw new Error(`Cloudflare challenge (${text.length} bytes) — likely IP-blocked`);
     }

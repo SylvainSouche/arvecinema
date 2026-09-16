@@ -1,112 +1,135 @@
-# Ciné Mont Blanc — Electron app
+# ArveCinema
 
-Electron 30 + React 18 + TypeScript + electron-vite.
+Electron desktop app for cinema showtimes in the Arve Valley (Sallanches, Cluses, Bonneville, Chamonix).
+
+Built with Electron 33 + React 18 + TypeScript + electron-vite. BSD-3-Clause licensed.
+
+## Features
+
+- **4 cinemas** via a modular adapter registry — add/remove a cinema in one line
+- **Day view**: one card per film (deduplicated across cinemas), sorted by next screening / title / cinema
+- **Week view**: swimlane grid with showtime chips positioned by real start/end time, middle-click drag to pan
+- **Filters**: cinema multi-select, day picker, audio version (VF/VO), hour range (quarter-hour slider), title/director/actor search
+- **Ratings**: progressive enrichment via Wikidata → AlloCiné (press + audience) + IMDB + Rotten Tomatoes (tomatometer)
+- **Dark / light theme**, French / English UI
+- **Offline cache**: Wikidata IDs cached permanently, ratings cached 24h
+
+## Prerequisites
+
+- **Node.js** ≥ 18.0 (required by Electron 33)
+- **npm** ≥ 9 (or compatible pnpm/yarn)
+- **Git** (to clone the repo)
+- **Network access** on first launch (Wikidata + AlloCiné/IMDB/RT are fetched lazily, then cached)
+- **Linux only**: `libnss3`, `libatk1.0-0`, `libatk-bridge2.0-0`, `libgbm1`, `libgtk-3-0` (Electron runtime deps; the hidden `BrowserWindow` used for Cloudflare bypass needs these too)
+- **macOS only (packaging)**: Xcode Command Line Tools + a Developer ID certificate if you want to notarize the `.dmg` (not required for personal use)
+
+## Install
+
+```bash
+git clone https://github.com/sylvain/arvecinema.git
+cd arvecinema
+npm install
+```
 
 ## Run
 
 ```bash
-npm install
-npm run dev        # dev mode (hot reload)
-npm run build      # production build → out/
-npm run preview    # preview production build
-npm run typecheck  # tsc --noEmit
+npm run dev          # dev mode (hot reload)
+npm run debug        # dev mode + DevTools + verbose logs (ARVE_DEBUG=1)
+npm run typecheck    # tsc --noEmit
+npm run build        # production build (electron-vite)
+npm run package:dir  # .app / unpacked folder
+npm run package:dmg  # macOS .dmg installer
+npm run package:zip  # macOS .zip (for notarization upload)
+npm run format       # prettier write
+npm run format:check # prettier check (CI)
 ```
 
-## Package as a macOS app
+Version bumping is explicit via `npm version <patch|minor|major>` (no auto-bump in scripts).
 
-```bash
-# Quick .app folder — no DMG, no code signing. Fastest way to verify the icon
-# and bundle structure. Output: dist/mac-arm64/Ciné Mont Blanc.app
-npm run package:dir
+## Security
 
-# Both .dmg installer AND .zip (for arm64 + x64 universal distribution)
-npm run package
+- **CSP** locked down in `index.html` — `default-src 'self'`, `script-src 'self'`, `connect-src 'self'`, no `unsafe-eval`, no remote `connect-src`
+- **Preload**: `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`
+- **Renderer navigation**: `will-navigate` blocks all remote origins AND restricts `file://` to the actual built `renderer/index.html` (path-compared, Windows drive-letter aware)
+- **Window-open**: renderer-initiated window creation is denied on the main window and on any future `webContents`
+- **Hidden `browserFetch` window** (used for Cloudflare bypass): explicit deny handlers for `setWindowOpenHandler`, `will-navigate` (deny all), `will-redirect` (same-registrable-domain allow-list only), plus `setPermissionRequestHandler` / `setPermissionCheckHandler` returning `false`
+- **`tickets:open` IPC**: HTTPS-only URL validation via `new URL().protocol` check before `shell.openExternal`
+- **Body-read timeout**: `readBodyWithTimeout` helper bounds the body read independently of headers timeout — prevents slow-trickle DoS
+- **Single instance**: `app.requestSingleInstanceLock()` — second launch focuses the existing window instead of spawning a new one
+- **Packaged menu**: full menu stripped in `app.isPackaged` so DevTools isn't exposed to end users
+- **Known residual audit findings**: all in transitive dev-only deps (node-gyp, tar, extract-zip, esbuild, vite) — none reach production runtime. Awaiting upstream releases compatible with Electron 33.
 
-# Just the .dmg installer
-npm run package:dmg
-```
-
-**Outputs** end up in `dist/`:
-- `dist/mac-arm64/Ciné Mont Blanc.app` — Apple Silicon
-- `dist/mac-x64/Ciné Mont Blanc.app` — Intel
-- `dist/Ciné Mont Blanc-1.0.0-arm64.dmg` — drag-to-Applications installer
-- `dist/Ciné Mont Blanc-1.0.0-mac.zip` — for notarization / Sparkle updates
-
-### Open the .app
-
-```bash
-open "dist/mac-arm64/Ciné Mont Blanc.app"
-```
-
-### Code signing & notarization (optional, for distribution)
-
-The default config uses **ad-hoc signing** (no Developer ID certificate needed). The app will run on your own Mac, but Gatekeeper will warn other users. To distribute publicly:
-
-1. Be a member of the Apple Developer Program
-2. Export your Developer ID Application certificate
-3. Add to `package.json`:
-   ```json
-   "mac": {
-     "identity": "Developer ID Application: Your Name (TEAMID)",
-     "notarize": {
-       "teamId": "TEAMID"
-     }
-   }
-   ```
-4. Set env vars `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`
-5. `npm run package` — electron-builder will sign + notarize automatically
-
-### Architecture notes
-
-- Default builds **both `arm64` and `x64`** (universal-ish, but as two separate DMGs)
-- On an Apple Silicon Mac, the `arm64` build is ~2× faster to launch
-- To build only for your host architecture: `electron-builder --mac dmg --arm64`
-- For a true single universal binary: change `arch` to `["universal"]` (slower build, larger file, but one DMG for everyone)
-
-## What it does
-
-- Fetches a 14-day schedule window from the Ciné Mont Blanc (Sallanches) public API
-- **Batched movie metadata fetch** via the correct `/movies?ids=A&ids=B&ids=C` endpoint
-  (the previous `/movie?id=` endpoint returned HTML and silently dropped title/poster/cast/director)
-- Day selector at the top lets you switch between available screening days
-- One-row-per-movie layout: poster on the left, big bold title + VF/VO badges + genres/runtime,
-  then direction and cast below, then showtimes
-- Filter by audio version (Tous / VF / VO) and time range
-
-## Structure
+## Architecture
 
 ```
 src/
-├── main/index.ts           Electron main: schedule + batched movie metadata fetch
-├── preload/index.ts        contextBridge → window.electronAPI
-└── renderer/
-    ├── index.html          Entry HTML (CSP-locked)
-    ├── index.tsx           React root
-    ├── App.tsx             App shell + day + filter state
-    ├── api/cinemaApi.ts    Wrapper over window.electronAPI.fetchSchedule
-    ├── types/index.ts      Movie / Showtime / ScheduleResponse + shared VF/VO helpers
-    └── components/
-        ├── DaySelector.tsx   Horizontal day picker
-        ├── FilterBar.tsx     VF/VO + hour range
-        ├── MovieCard.tsx     One-row layout
-        └── ShowtimeList.tsx  Time chips + ticketing links
+├── main/
+│   ├── index.ts                 Electron main process (window lifecycle, IPC, security handlers)
+│   ├── tz.ts                    Forces process.env.TZ = 'Europe/Paris' before any Date construction
+│   ├── cinemas/
+│   │   ├── registry.ts           Drop-in cinema registry (add one line)
+│   │   ├── types.ts              CinemaAdapter interface + Movie/Showtime types
+│   │   ├── boxOfficeApiAdapter   JSON API adapter (Mont-Blanc, Cluses)
+│   │   ├── cineChateauAdapter    HTML scraper (Bonneville, ISO-8859-1 fallback)
+│   │   └── cineVoxAdapter        HTML scraper (Chamonix, ISO-8859-1 fallback, URL-timestamp based)
+│   └── ratings/
+│       ├── ratingsEnricher.ts    Two-phase progressive enrichment + in-flight dedup
+│       ├── RatingProvider.ts     Per-source rating fetch orchestration
+│       ├── wikidataClient.ts     SPARQL + wbgetentities (IDs only, with year disambiguation)
+│       ├── allocineClient.ts      AlloCiné scraper (browserFetch, `rating-mdl nXX` parser)
+│       ├── imdbClient.ts          IMDB scraper (browserFetch, JSON-LD parser)
+│       ├── rottenTomatoesClient  RT scraper (pooledFetch, JSON-LD tomatometer)
+│       └── browserFetch.ts        Hidden BrowserWindow (bypasses Cloudflare, same-domain redirects only)
+├── preload/index.ts             contextBridge (narrow IPC surface — only `cinemas:list`, `schedule:fetch`, `tickets:open`, `rating:updated`)
+├── renderer/
+│   ├── App.tsx                  Shell + filter pipeline + sort
+│   ├── components/              11 React components (ErrorBoundary, DaySelector, CinemaSelector, DoubleRangeSlider, MovieCard, ShowtimeList, WeekGrid, FilterBar, CinemaStatusBanner, SortSelector, ViewToggle)
+│   ├── types/index.ts           Re-exports shared types
+│   └── api/cinemaApi.ts         IPC wrapper (typed)
+└── shared/
+    ├── types.ts                 Single source of truth (Movie, Showtime, CinemaInfo, etc.)
+    ├── cinema.ts                Date/time/format helpers (timezone-safe via Intl with Europe/Paris)
+    ├── i18n.ts                  All UI strings (fr/en)
+    ├── userAgent.ts             Dynamic `ArveCinema/{version}` User-Agent
+    ├── connectionPool.ts        Per-domain rate-limited fetch (serialized per host, 2s default delay)
+    └── fetchWithTimeout.ts      AbortController-based fetch timeout + readBodyWithTimeout helper + TimeoutError
 ```
 
-## API notes
+## Adding a cinema
 
-The cinema exposes a Gatsby-source-boxofficeapi backend:
+Open `src/main/cinemas/registry.ts` and append:
 
-| Endpoint | Purpose |
-|---|---|
-| `GET /api/gatsby-source-boxofficeapi/schedule?from=ISO&to=ISO&theaters={"id":"P1798","timeZone":"Europe/Paris"}` | Returns `{ P1798: { schedule, showtimesDates, moviesTags } }` where `showtimesDates` is the list of available screening days |
-| `GET /api/gatsby-source-boxofficeapi/movies?ids=A&ids=B&...` | Returns an array of movie objects (`title`, `poster`, `casting[]`, `direction[]`, `synopsis`, `genres`, `release`, `runtime`) |
+```ts
+{
+  id: 'my-cinema',
+  name: 'Ciné Example',
+  city: 'Example',
+  color: '#ff6600',
+  adapter: createBoxOfficeApiAdapter('my-cinema', {
+    baseUrl: 'https://www.example-cinema.fr',
+    theaterId: 'PXXXX',
+  }),
+}
+```
 
-## Key design choices
+Two adapter factories are provided:
+- `createBoxOfficeApiAdapter` — for gatsby-source-boxofficeapi sites (JSON API)
+- `createCineChateauAdapter` / `createCineVoxAdapter` — for cotecine.fr sites (HTML scraping, ISO-8859-1 aware)
 
-- **`main` field = `./out/main/index.js`** — matches electron-vite's default output convention (`src/main/index.ts` → `out/main/index.js`). Renaming source files from `main.ts` / `preload.ts` to `index.ts` was the fix for the `No electron app entry file found` error.
-- **`process.env.TZ = 'Europe/Paris'`** is set at the very top of the main process so all `Date` math (day window, showtime hour, day key) operates in Paris time, regardless of the host machine's timezone.
-- **Showtime hours and days** are parsed via `new Date(time).getHours()` and a `parisDay()` helper — never by string-slicing the ISO (which would yield UTC values).
-- **Movie metadata is fetched in one batched request** instead of N per-movie requests, fixing the previous "Film {id} + no poster + no cast" issue and making startup much faster.
-- **VF/VO detection is centralized** in `src/renderer/types/index.ts` (`isVFShowtime`, `isVOShowtime`, `showtimeVersion`) and mirrored in the main process.
-- **CSP** is set in `index.html` to allow inline styles + posters from any https CDN, while restricting script execution to `'self'`.
-- **`sandbox: true`** in `webPreferences` and **`contextIsolation: true`** for a hardened preload boundary.
+## Ratings pipeline
+
+1. **Phase 1** (fast): Wikidata lookup by AlloCiné ID or title + year → resolves QID, IMDB ID, RT path, AlloCiné ID. UI shows source icons immediately.
+2. **Phase 2** (progressive): Scrape AlloCiné + IMDB + RT in sequence. Each source sends a `rating:updated` IPC event as it completes — scores appear one by one. Failed sources surface a `❓` placeholder.
+
+Cloudflare-protected sites (IMDB, AlloCiné) are scraped via a hidden Electron `BrowserWindow` that runs real Chromium JS. Cloudflare's `cf_clearance` cookie is persisted in a per-domain partition so subsequent requests skip the challenge.
+
+Two cache tiers in the user data dir:
+- **IDs cache** (Wikidata → IMDB/RT/AlloCiné IDs): permanent, no TTL
+- **Ratings cache** (scraped scores): 24h TTL
+
+In-flight deduplication: concurrent lookups for the same film share a single network request via `inflightIds` / `inflightRatings` Maps.
+
+## License
+
+BSD 3-Clause — see [LICENSE](LICENSE).

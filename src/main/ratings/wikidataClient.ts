@@ -1,4 +1,5 @@
 import { fetchWithTimeout, REQUEST_TIMEOUT_MS } from '../../shared/fetchWithTimeout';
+import { APP_USER_AGENT } from '../../shared/userAgent';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Wikidata client — public, free, no API key required.
@@ -20,7 +21,7 @@ import { fetchWithTimeout, REQUEST_TIMEOUT_MS } from '../../shared/fetchWithTime
 
 const WIKIDATA_API = 'https://www.wikidata.org/w/api.php';
 const WIKIDATA_SPARQL = 'https://query.wikidata.org/sparql';
-const WIKIDATA_UA = 'ArveCinema/1.0.0 (https://github.com/local/arvecinema)';
+const WIKIDATA_UA = APP_USER_AGENT;
 
 /** External IDs we extract from Wikidata for a film. */
 export interface WikidataIds {
@@ -181,7 +182,7 @@ async function getFilmIds(qid: string): Promise<WikidataIds | null> {
       return typeof v === 'object' && v !== null && FILM_TYPES.has(v['id'] as string);
     });
     const hasRelevantProp = Boolean(
-      entity.claims?.P345 || entity.claims?.P1258 || entity.claims?.P1262
+      entity.claims?.P345 || entity.claims?.P1258 || entity.claims?.P1265
     );
     if (!isFilmType && !hasRelevantProp) return null;
 

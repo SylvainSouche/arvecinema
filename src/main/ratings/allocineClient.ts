@@ -1,4 +1,5 @@
 import { browserFetch } from './browserFetch';
+import { APP_USER_AGENT } from '../../shared/userAgent';
 import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
@@ -20,7 +21,7 @@ import fs from 'fs';
 const ALLOCINE_BASE = 'https://www.allocine.fr';
 
 const HEADERS: Record<string, string> = {
-  'User-Agent': 'ArveCinema/1.0.0 (cinema schedule app; +https://github.com/local/arvecinema)',
+  'User-Agent': APP_USER_AGENT,
   Accept: 'text/html, application/xhtml+xml, application/xml;q=0.9, */*;q=0.8',
   'Accept-Language': 'fr-FR, fr;q=0.5',
 };

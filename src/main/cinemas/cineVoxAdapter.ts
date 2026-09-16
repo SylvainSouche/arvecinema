@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import { APP_USER_AGENT } from '../../shared/userAgent';
 import type { CinemaAdapter, Movie, Showtime } from './types';
 import { ScraperSchemaChangedError } from './cineChateauAdapter';
 import { toIsoDay, parseShowtimeDate } from '../../shared/cinema';
@@ -32,7 +33,7 @@ export interface CineVoxConfig {
 const HEADERS: Record<string, string> = {
   Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
   'Accept-Language': 'fr-FR,fr;q=0.9',
-  'User-Agent': 'ArveCinema/1.0.0 (+https://github.com/local/arvecinema)',
+  'User-Agent': APP_USER_AGENT,
 };
 
 const UNKNOWN = 'Non spécifié';
@@ -70,15 +71,13 @@ export function createCineVoxAdapter(
       );
       if (!res.ok) throw new Error(`${cinemaId}: HTTP ${res.status}`);
 
-      // The Vox page is served as ISO-8859-1 (declared in the Content-Type
-      // header). fetch().text() decodes using the declared encoding, but if
-      // the server lies we fall back to manual decode from bytes.
-      let html = await res.text();
-      // Defensive: if the text contains the UTF-8 replacement char (�) on
-      // accented characters, the declared encoding was wrong and we need to
-      // re-decode from bytes as ISO-8859-1.
+      // Consume body as ArrayBuffer ONCE, then decode.
+      // The Vox page is served as ISO-8859-1. If we decode as UTF-8,
+      // accented characters become replacement chars (�). Detect and
+      // re-decode from the same bytes.
+      const buf = await res.arrayBuffer();
+      let html = new TextDecoder('utf-8').decode(buf);
       if (html.includes('\uFFFD')) {
-        const buf = await (await fetch(`${baseUrl}${schedulePath}`, { headers: buildHeaders(baseUrl) })).arrayBuffer();
         html = new TextDecoder('iso-8859-1').decode(buf);
       }
       const $ = cheerio.load(html);

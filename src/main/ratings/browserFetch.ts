@@ -19,6 +19,10 @@ export async function browserFetch(
   url: string,
   _opts: { headers?: Record<string, string>; referer?: string } = {},
 ): Promise<string> {
+  // Capture the initial URL for redirect-policy enforcement below — we only
+  // allow redirects within the same registrable domain as the original target.
+  const initialUrl = url;
+
   // Use a persistent partition per-domain so Cloudflare cookies persist
   // between requests to the same site (Cloudflare sets a cf_clearance
   // cookie that lasts ~30 min — reusing it means subsequent requests
@@ -37,12 +41,47 @@ export async function browserFetch(
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
-      // DON'T disable images — Cloudflare detects this as bot behavior.
       images: true,
-      // DON'T disable JavaScript — needed for Cloudflare challenge.
       javascript: true,
     },
   });
+
+  // Harden the hidden window: deny all window-open + navigation + permission
+  // requests. This window is only ever used to load ONE URL we control (the
+  // Cloudflare-protected page we're scraping); any other navigation is by
+  // definition an attack vector (e.g. a malicious redirect from a
+  // compromised page trying to escape the hidden window).
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    console.warn(`[browserFetch] blocked window-open to: ${url}`);
+    return { action: 'deny' };
+  });
+  // will-navigate fires for in-page navigations (link clicks, location.href
+  // assignments, form submits) but NOT for the initial loadURL nor for
+  // server-side redirects (those use will-redirect below). Deny unconditionally.
+  win.webContents.on('will-navigate', (event, url) => {
+    event.preventDefault();
+    console.warn(`[browserFetch] blocked will-navigate to: ${url}`);
+  });
+  // will-redirect fires for HTTP 3xx redirects. Cloudflare challenges
+  // legitimately redirect within their own domain before reaching the real
+  // page, so we allow same-registrable-domain redirects but block
+  // cross-domain jumps (which would indicate compromise or captive-portal
+  // hijack).
+  win.webContents.on('will-redirect', (event, url) => {
+    try {
+      const initialHost = new URL(initialUrl).hostname;
+      const redirectHost = new URL(url).hostname;
+      if (redirectHost === initialHost ||
+          redirectHost.endsWith('.' + initialHost) ||
+          initialHost.endsWith('.' + redirectHost)) {
+        return;  // allowed — same registrable domain
+      }
+    } catch { /* fall through to block */ }
+    event.preventDefault();
+    console.warn(`[browserFetch] blocked will-redirect to: ${url}`);
+  });
+  ses.setPermissionRequestHandler(() => false);
+  ses.setPermissionCheckHandler(() => false);
 
   try {
     if (DEBUG) console.log(`[browserFetch] → loading ${url}`);
