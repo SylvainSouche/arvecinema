@@ -26,7 +26,7 @@ Built with Electron 33 + React 18 + TypeScript + electron-vite. BSD-3-Clause lic
 ## Install
 
 ```bash
-git clone https://github.com/sylvain/arvecinema.git
+git clone https://github.com/SylvainSouche/arvecinema.git
 cd arvecinema
 npm install
 ```
@@ -44,6 +44,16 @@ npm run package:zip  # macOS .zip (for notarization upload)
 npm run format       # prettier write
 npm run format:check # prettier check (CI)
 ```
+
+### Environment variables
+
+| Variable | Effect |
+|---|---|
+| `ARVE_DEBUG=1` | Verbose console logging (`[ratings]`, `[fetch]`, `[imdb-graphql]`, `[browserFetch]` prefixes) + saves raw HTML responses to `userData/debug/` |
+| `ARVE_NO_CACHE=1` | **Bypass both cache tiers** — `readIdsCache` / `readRatingsCache` return empty, writes are no-ops, `isFresh` always returns false. Every launch will hit Wikidata + IMDB GraphQL + AlloCiné + RT from scratch. Useful for testing the full pipeline. Existing cache files are NOT deleted — they're just ignored for the session. |
+| `ARVE_IMDB_GRAPHQL=1` | **Re-enable the IMDB GraphQL batch path** (disabled by default since 0.3.10). The only known batch persisted query hash (`WatchlistStateById`) requires an authenticated user — its query template includes the `predefinedList` field, which IMDB rejects for anonymous users. Useful for re-testing when a new persisted hash is discovered. |
+
+Combined example: `ARVE_DEBUG=1 ARVE_NO_CACHE=1 npm run dev`
 
 Version bumping is explicit via `npm version <patch|minor|major>` (no auto-bump in scripts).
 
@@ -70,21 +80,23 @@ src/
 │   ├── cinemas/
 │   │   ├── registry.ts           Drop-in cinema registry (add one line)
 │   │   ├── types.ts              CinemaAdapter interface + Movie/Showtime types
-│   │   ├── boxOfficeApiAdapter   JSON API adapter (Mont-Blanc, Cluses)
-│   │   ├── cineChateauAdapter    HTML scraper (Bonneville, ISO-8859-1 fallback)
-│   │   └── cineVoxAdapter        HTML scraper (Chamonix, ISO-8859-1 fallback, URL-timestamp based)
+│   │   ├── boxOfficeApiAdapter   JSON API adapter (Mont-Blanc, Cluses, Bonneville)
+│   │   ├── cineChateauAdapter    ⚠️ Sleeping backup — old HTML scraper for Bonneville (now uses boxOfficeApi)
+│   │   └── cineVoxAdapter        HTML scraper (Chamonix, ISO-8859-1, URL-timestamp based)
 │   └── ratings/
-│       ├── ratingsEnricher.ts    Two-phase progressive enrichment + in-flight dedup
-│       ├── RatingProvider.ts     Per-source rating fetch orchestration
-│       ├── wikidataClient.ts     SPARQL + wbgetentities (IDs only, with year disambiguation)
+│       ├── ratingsEnricher.ts    Three-phase progressive enrichment (Wikidata IDs → IMDB dataset lookup → per-film AlloCiné/RT)
+│       ├── cacheDb.ts             **Single SQLite cache** (`cache.db`) — `ids_cache` + `ratings_cache` + `imdb_ratings` + `meta` tables. Auto-migrates old JSON files.
+│       ├── wikidataClient.ts     SPARQL batch + per-film title search (IDs only, with year disambiguation)
 │       ├── allocineClient.ts      AlloCiné scraper (browserFetch, `rating-mdl nXX` parser)
-│       ├── imdbClient.ts          IMDB scraper (browserFetch, JSON-LD parser)
+│       ├── imdbDatasetClient.ts   **IMDB ratings via official dataset** — stored in shared `cache.db` `imdb_ratings` table (36h refresh, in-background)
+│       ├── imdbClient.ts          ⚠️ Sleeping backup — per-film IMDB HTML scraper (browserFetch). Not imported by active code.
+│       ├── imdbGraphqlClient.ts   ⚠️ Sleeping backup / dev probe — IMDB GraphQL batch. Not imported by active code.
 │       ├── rottenTomatoesClient  RT scraper (pooledFetch, JSON-LD tomatometer)
-│       └── browserFetch.ts        Hidden BrowserWindow (bypasses Cloudflare, same-domain redirects only)
-├── preload/index.ts             contextBridge (narrow IPC surface — only `cinemas:list`, `schedule:fetch`, `tickets:open`, `rating:updated`)
+│       └── browserFetch.ts        Hidden BrowserWindow (bypasses Cloudflare for AlloCiné, same-domain redirects only, ad-blocker)
+├── preload/index.ts             contextBridge (narrow IPC surface — `cinemas:list`, `schedule:fetch`, `tickets:open`, `rating:updated`, `ratings:progress`, `network:activity`)
 ├── renderer/
 │   ├── App.tsx                  Shell + filter pipeline + sort
-│   ├── components/              11 React components (ErrorBoundary, DaySelector, CinemaSelector, DoubleRangeSlider, MovieCard, ShowtimeList, WeekGrid, FilterBar, CinemaStatusBanner, SortSelector, ViewToggle)
+│   ├── components/              14 React components (ErrorBoundary, DaySelector, CinemaSelector, DoubleRangeSlider, MovieCard, ShowtimeList, WeekGrid, FilterBar, CinemaStatusBanner, SortSelector, ViewToggle, ProgressBar, ExportButton, AboutPanel)
 │   ├── types/index.ts           Re-exports shared types
 │   └── api/cinemaApi.ts         IPC wrapper (typed)
 └── shared/
@@ -119,17 +131,46 @@ Two adapter factories are provided:
 
 ## Ratings pipeline
 
-1. **Phase 1** (fast): Wikidata lookup by AlloCiné ID or title + year → resolves QID, IMDB ID, RT path, AlloCiné ID. UI shows source icons immediately.
-2. **Phase 2** (progressive): Scrape AlloCiné + IMDB + RT in sequence. Each source sends a `rating:updated` IPC event as it completes — scores appear one by one. Failed sources surface a `❓` placeholder.
+Three-phase progressive enrichment:
 
-Cloudflare-protected sites (IMDB, AlloCiné) are scraped via a hidden Electron `BrowserWindow` that runs real Chromium JS. Cloudflare's `cf_clearance` cookie is persisted in a per-domain partition so subsequent requests skip the challenge.
+1. **Phase 1** (fast, parallel): Wikidata lookup by AlloCiné ID or title + year → resolves QID, IMDB ID, RT path, AlloCiné ID. UI shows source icons immediately, before any score is fetched.
+2. **Phase 1.5** (instant): all movies with an IMDB ID are looked up in the local **SQLite database** (`cache.db`, table `imdb_ratings`, populated from IMDB's official public dataset `title.ratings.tsv.gz` — 1.71M rated titles, refreshed every 36h). Sync `SELECT ... WHERE tconst IN (...)` query — no network calls at request time. `rating:updated` IPC fires per-film as each result lands.
+   - The SQLite DB lives at `~/Library/Application Support/ArveCinema/cache.db` (macOS) / `~/.config/ArveCinema/cache.db` (Linux) / `%APPDATA%\ArveCinema\cache.db` (Windows).
+   - The `.tsv.gz` is downloaded to a temp file, parsed, inserted into SQLite in a transaction, then deleted — only the DB is kept on disk.
+   - Refresh logic: on startup, check the `meta.last_update` row in the DB. If older than 36h (or DB empty), kick off a background refresh. **Does NOT block UI** — the app shows whatever's in the DB immediately, and re-emits `rating:updated` for any films whose ratings changed after the refresh completes.
+3. **Phase 2** (slow, per-film, progressive): AlloCiné + Rotten Tomatoes scraping via `browserFetch` (hidden BrowserWindow with ad/tracker blocker). IMDB is NOT scraped — the dataset is the single source of truth.
 
-Two cache tiers in the user data dir:
-- **IDs cache** (Wikidata → IMDB/RT/AlloCiné IDs): permanent, no TTL
-- **Ratings cache** (scraped scores): 24h TTL
+Each source completion fires a `rating:updated` IPC event so the score appears progressively next to its icon in the UI. Failed sources surface a `❓` placeholder.
 
-In-flight deduplication: concurrent lookups for the same film share a single network request via `inflightIds` / `inflightRatings` Maps.
+Cloudflare-protected sites (AlloCiné) are scraped via a hidden Electron `BrowserWindow` that runs real Chromium JS. Cloudflare's `cf_clearance` cookie is persisted in a per-domain partition so subsequent requests skip the challenge.
+
+Storage in the user data dir:
+- **`cache.db`** — single SQLite file containing all caches (see below)
+- **In-flight dedup**: concurrent lookups for the same film share a single network request via `inflightIds` / `inflightRatings` Maps
+
+### `cache.db` schema
+
+| Table | Keyed by | TTL | Purpose |
+|---|---|---|---|
+| `ids_cache` | `cache_key` (e.g. `allocine:55774` or `title:cars:2006`) | Permanent | Wikidata → IMDB/RT/AlloCiné ID resolution |
+| `ratings_cache` | `qid` | 24h | Scraped AlloCiné/RT scores per film |
+| `imdb_ratings` | `tconst` | 36h | IMDB dataset (1.71M rated titles), refreshed in background |
+| `meta` | `key` | — | Generic key/value (e.g. `imdb_dataset_last_update`) |
+
+Old JSON cache files (`ids-cache.json`, `ratings-cache.json`) and the old standalone `imdb-ratings.db` are auto-migrated to SQLite on first launch (see `cacheDb.migrateJsonCaches()`), then renamed to `.archived` so we don't re-import them.
 
 ## License
 
 BSD 3-Clause — see [LICENSE](LICENSE).
+
+## Attribution
+
+**IMDB ratings** are sourced from IMDB's official public dataset
+([`title.ratings.tsv.gz`](https://datasets.imdbws.com/)), used under IMDB's
+non-commercial data license. Per the terms at
+<https://help.imdb.com/article/imdb/general-information/can-i-use-imdb-data-in-my-software/G5JTRESSHJBBHTGX>:
+
+> Information courtesy of IMDb (https://www.imdb.com). Used with permission.
+
+The dataset is downloaded daily and cached locally; no scraping of imdb.com
+is performed.

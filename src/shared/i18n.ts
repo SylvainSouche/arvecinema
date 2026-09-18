@@ -71,7 +71,20 @@ export type TranslationKey =
   | 'language'
   | 'french'
   | 'english'
-  | 'noSessions';
+  | 'noSessions'
+  // ── About panel ────────────────────────────────────────────────────────
+  | 'about'
+  | 'aboutTitle'
+  | 'close'
+  | 'aboutLicense'
+  | 'aboutLicenseIntro'
+  | 'aboutDependencies'
+  | 'aboutDependenciesIntro'
+  | 'aboutAttributions'
+  | 'aboutPersonalUse'
+  | 'aboutPersonalUseDescription'
+  | 'aboutImdbDescription'
+  | 'aboutWikidataDescription';
 
 type Translations = Record<TranslationKey, { fr: string; en: string }>;
 
@@ -124,6 +137,35 @@ export const TRANSLATIONS: Translations = {
   french:            { fr: 'Français', en: 'French' },
   english:           { fr: 'Anglais', en: 'English' },
   noSessions:        { fr: 'Aucune séance dans cette plage.', en: 'No showtimes in this range.' },
+
+  // ── About panel ──────────────────────────────────────────────────────────
+  about:                { fr: 'À propos', en: 'About' },
+  aboutTitle:           { fr: 'À propos d\'ArveCinema', en: 'About ArveCinema' },
+  close:                { fr: 'Fermer', en: 'Close' },
+  aboutLicense:         { fr: 'Licence', en: 'License' },
+  aboutLicenseIntro:    {
+    fr: 'Ce logiciel est distribué sous la licence BSD 3-Clause. Voir le fichier',
+    en: 'This software is distributed under the BSD 3-Clause license. See the',
+  },
+  aboutDependencies:    { fr: 'Bibliothèques utilisées', en: 'Used software' },
+  aboutDependenciesIntro: {
+    fr: 'ArveCinema s\'appuie sur les logiciels open-source suivants :',
+    en: 'ArveCinema relies on the following open-source software:',
+  },
+  aboutAttributions:   { fr: 'Informations', en: 'Information' },
+  aboutPersonalUse:    { fr: 'Application de navigation personnelle', en: 'Personal navigation app' },
+  aboutPersonalUseDescription: {
+    fr: 'ArveCinema est une application de navigation personnelle permettant de consulter les horaires de séances des cinémas de la vallée de l\'Arve. Les horaires proviennent directement des sites web des cinémas. Les notes et métadonnées affichées sont obtenues à des fins d\'information personnelle et non commerciale. Aucune donnée n\'est rediffusée ni revendue.',
+    en: 'ArveCinema is a personal navigation app for browsing cinema showtimes in the Arve Valley. Showtimes are fetched directly from cinema websites. Ratings and metadata displayed are retrieved for personal, non-commercial informational purposes only. No data is republished or sold.',
+  },
+  aboutImdbDescription: {
+    fr: 'Notes IMDB issues du jeu de données public officiel (title.ratings.tsv.gz), téléchargé quotidiennement depuis datasets.imdbws.com.',
+    en: 'IMDB ratings sourced from the official public dataset (title.ratings.tsv.gz), downloaded daily from datasets.imdbws.com.',
+  },
+  aboutWikidataDescription: {
+    fr: 'Correspondances titre → ID IMDB résolues via les identifiants Wikidata (P345). Données sous licence CC0.',
+    en: 'Title → IMDB ID resolution via Wikidata identifiers (P345). Data released under CC0.',
+  },
 };
 
 // ── Locale storage ─────────────────────────────────────────────────────────

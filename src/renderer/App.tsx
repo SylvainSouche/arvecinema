@@ -13,6 +13,9 @@ import { WeekGrid } from './components/WeekGrid';
 import { ViewToggle, type ViewMode } from './components/ViewToggle';
 import type { SortMode } from './components/SortSelector';
 import { CinemaStatusBanner } from './components/CinemaStatusBanner';
+import { AboutPanel } from './components/AboutPanel';
+import { ProgressBar } from './components/ProgressBar';
+import { ExportButton } from './components/ExportButton';
 import appIcon from './assets/icon-64.png';
 import { t, useLocale } from '../shared/i18n';
 
@@ -100,6 +103,20 @@ export const App: React.FC = () => {
     catch { return 'dark'; }
   });
 
+  /** About panel visibility — opened by the ℹ️ button in the header. */
+  const [showAbout, setShowAbout] = useState(false);
+
+  /** Enrichment progress — { resolved, total, pct }. Updated via IPC
+   *  from the main process as films are processed. When pct >= 100, the
+   *  bottom progress bar hides itself. */
+  const [progress, setProgress] = useState<{ resolved: number; total: number; pct: number }>({
+    resolved: 0, total: 0, pct: 0,
+  });
+
+  /** Network activity — true when any browserFetch / pooledFetch / dataset
+   *  download is in flight. Drives the refresh-icon spinner animation. */
+  const [networkActive, setNetworkActive] = useState(false);
+
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     try { localStorage.setItem('arvecinema-theme', theme); } catch { /* ignore */ }
@@ -131,6 +148,19 @@ export const App: React.FC = () => {
       }));
     });
     return unsubscribe;
+  }, []);
+
+  // Subscribe to enrichment progress + network activity IPC events.
+  // Progress updates drive the bottom progress bar (X/Y films processed).
+  // Network activity drives the refresh-icon spinner in the header.
+  useEffect(() => {
+    const unsubProgress = window.electronAPI.onRatingsProgress((data) => {
+      setProgress(data);
+    });
+    const unsubNetwork = window.electronAPI.onNetworkActivity((active) => {
+      setNetworkActive(active);
+    });
+    return () => { unsubProgress(); unsubNetwork(); };
   }, []);
 
   // ── Derive hour bounds from the actual showtime data (UX-01) ───────────────
@@ -448,9 +478,34 @@ export const App: React.FC = () => {
             onClick={refresh}
             aria-label={t('refresh')}
             title={t('refreshTooltip')}
-            style={headerBtnStyle}
+            style={{
+              ...headerBtnStyle,
+              position: 'relative',
+            }}
           >
-            ↻
+            {/* Spinner ring — visible only when network activity is in flight.
+                Two layers: an outer rotating ring (border-top colored) and
+                an inner partial circle that fills 0→100% based on enrichment
+                progress. When networkActive is false, this is hidden and
+                the static ↻ glyph shows instead. */}
+            {networkActive ? (
+              <span
+                aria-hidden
+                style={{
+                  position: 'absolute',
+                  top: '50%', left: '50%',
+                  width: 18, height: 18,
+                  marginTop: -9, marginLeft: -9,
+                  borderRadius: '50%',
+                  border: '2px solid var(--border-light)',
+                  borderTopColor: '#4a9eff',
+                  animation: 'arve-spin 0.8s linear infinite',
+                  boxSizing: 'border-box',
+                }}
+              />
+            ) : (
+              <span aria-hidden>↻</span>
+            )}
           </button>
           <button
             type="button"
@@ -470,6 +525,17 @@ export const App: React.FC = () => {
           >
             {locale === 'fr' ? '🇬🇧' : '🇫🇷'}
           </button>
+          <button
+            type="button"
+            onClick={() => setShowAbout(true)}
+            aria-label={t('about')}
+            title={t('about')}
+            style={headerBtnStyle}
+          >
+            ℹ
+          </button>
+          {/* Dev-only data export — hidden in packaged builds via import.meta.env.DEV */}
+          <ExportButton movies={movies} />
           <ViewToggle value={viewMode} onChange={setViewMode} />
         </div>
       </header>
@@ -541,6 +607,28 @@ export const App: React.FC = () => {
           />
         </main>
       )}
+
+      {/* About / Help modal — opened from the header ℹ️ button */}
+      <AboutPanel
+        open={showAbout}
+        onClose={() => setShowAbout(false)}
+        version={APP_VERSION}
+      />
+
+      {/* Bottom progress bar — 3px high, shows enrichment progress 0→100%.
+          Hides itself (returns null) when complete or no enrichment running. */}
+      <ProgressBar
+        resolved={progress.resolved}
+        total={progress.total}
+        pct={progress.pct}
+      />
+
+      {/* CSS keyframes for the refresh-button spinner. Injected once. */}
+      <style>{`
+        @keyframes arve-spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 };

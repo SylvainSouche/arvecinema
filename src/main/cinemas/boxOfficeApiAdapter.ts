@@ -3,6 +3,7 @@ import { APP_USER_AGENT } from '../../shared/userAgent';
 import { isVFTags, isVOTags, TIMEZONE } from './types';
 import { toIsoDay, parseShowtimeDate } from '../../shared/cinema';
 import { fetchWithTimeout, REQUEST_TIMEOUT_MS } from '../../shared/fetchWithTimeout';
+import { withNetworkTracking } from '../ratings/networkActivity';
 
 // ──────────────────────────────────────────────────────────────────────────
 // boxofficeapi adapter
@@ -79,11 +80,11 @@ export function createBoxOfficeApiAdapter(
         theaters: JSON.stringify({ id: cfg.theaterId, timeZone }),
       });
 
-      const schedRes = await fetchWithTimeout(
+      const schedRes = await withNetworkTracking(() => fetchWithTimeout(
         `${cfg.baseUrl}/api/gatsby-source-boxofficeapi/schedule?${params}`,
         { headers },
         REQUEST_TIMEOUT_MS,
-      );
+      ));
       if (!schedRes.ok) {
         throw new Error(`${cinemaId}: schedule HTTP ${schedRes.status}`);
       }
@@ -178,11 +179,11 @@ export function createBoxOfficeApiAdapter(
           for (const id of batch) metaParams.append('ids', id);
 
           try {
-            const metaRes = await fetchWithTimeout(
+            const metaRes = await withNetworkTracking(() => fetchWithTimeout(
               `${cfg.baseUrl}/api/gatsby-source-boxofficeapi/movies?${metaParams}`,
               { headers },
               REQUEST_TIMEOUT_MS,
-            );
+            ));
             if (metaRes.ok) {
               const metaList: unknown = await metaRes.json();
               if (Array.isArray(metaList)) {

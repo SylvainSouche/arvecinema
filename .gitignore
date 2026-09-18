@@ -1,8 +1,19 @@
-node_modules
-out
-dist
+node_modules/
+out/
+dist/
+.vite/
 .DS_Store
 *.log
-.vscode
+.vscode/
+.idea/
 .env
 .env.local
+
+# Runtime cache files (may land in repo dir during dev)
+cache.db
+cache.db-wal
+cache.db-shm
+*.archived
+title.ratings.tsv.gz*
+debug/
+*.tsbuildinfo

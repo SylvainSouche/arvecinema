@@ -1,3 +1,26 @@
+// ──────────────────────────────────────────────────────────────────────────
+// ⚠️  SLEEPING BACKUP — NOT USED IN ACTIVE CODE  ⚠️
+//
+// This file implements per-film IMDB ratings scraping via a hidden
+// BrowserWindow. It loads each imdb.com title page, extracts the rating
+// from JSON-LD, and returns it.
+//
+// As of v0.5.0, this approach has been RETIRED in favor of `imdbDatasetClient.ts`,
+// which uses IMDB's official public dataset (https://datasets.imdbws.com/
+// title.ratings.tsv.gz) — a daily-refreshed SQLite-backed local cache.
+//
+// This file remains in the tree as a sleeping backup. If the dataset
+// becomes unavailable in the future, re-enable by importing `fetchImdbRating`
+// from this module in `ratingsEnricher.ts` and re-adding the fallback path
+// in the Phase 2 IMDB section (currently removed).
+//
+// Reasons for retirement:
+//   1. Per-film browserFetch is ~50× slower than dataset lookup
+//   2. Susceptible to imdb.com page-structure changes (CSS class churn)
+//   3. Triggers hidden BrowserWindow opens for every film (~2-5s each)
+//   4. The dataset is more reliable (1.71M rated titles, daily refresh)
+// ──────────────────────────────────────────────────────────────────────────
+
 import { browserFetch } from './browserFetch';
 import { APP_USER_AGENT } from '../../shared/userAgent';
 import { app } from 'electron';

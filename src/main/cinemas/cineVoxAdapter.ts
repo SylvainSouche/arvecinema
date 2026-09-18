@@ -3,7 +3,7 @@ import { APP_USER_AGENT } from '../../shared/userAgent';
 import type { CinemaAdapter, Movie, Showtime } from './types';
 import { ScraperSchemaChangedError } from './cineChateauAdapter';
 import { toIsoDay, parseShowtimeDate } from '../../shared/cinema';
-import { fetchWithTimeout, REQUEST_TIMEOUT_MS } from '../../shared/fetchWithTimeout';
+import { browserFetch } from '../ratings/browserFetch';
 
 // ──────────────────────────────────────────────────────────────────────────
 // cinemavox-chamonix.com adapter (Chamonix)
@@ -49,6 +49,59 @@ const parseRuntimeMinutes = (s: string): number | undefined => {
   return h * 60 + min;
 };
 
+/** Parse a release date from the .hr_dur text.
+ *  Patterns supported:
+ *    "Sortie : 9 septembre 2026"  → "2026-09-09T00:00:00.000Z"
+ *    "Sortie : 09/09/2026"        → "2026-09-09T00:00:00.000Z"
+ *    "Sortie : 9 sept. 2026"      → "2026-09-09T00:00:00.000Z"
+ *  Returns undefined if no "Sortie :" pattern is found. */
+const FRENCH_MONTHS: Record<string, number> = {
+  'janvier': 0, 'janv': 0, 'jan': 0, 'février': 1, 'fevrier': 1, 'fév': 1, 'fev': 1, 'févr': 1, 'fevr': 1,
+  'mars': 2, 'mar': 2, 'avril': 3, 'avr': 3, 'mai': 4, 'juin': 5, 'juil': 6, 'juillet': 6,
+  'août': 7, 'aout': 7, 'septembre': 8, 'sept': 8, 'sep': 8, 'octobre': 9, 'oct': 9,
+  'novembre': 10, 'nov': 10, 'décembre': 11, 'decembre': 11, 'déc': 11, 'dec': 11,
+};
+
+const parseReleaseDate = (s: string): string | undefined => {
+  // Try "Sortie : DD/MM/YYYY"
+  const dmyMatch = s.match(/Sortie\s*:\s*(\d{1,2})\s*\/\s*(\d{1,2})\s*\/\s*(\d{4})/i);
+  if (dmyMatch) {
+    const [, dd, mm, yyyy] = dmyMatch;
+    return new Date(Date.UTC(Number(yyyy), Number(mm) - 1, Number(dd))).toISOString();
+  }
+  // Try "Sortie : DD Month YYYY" (with year)
+  const frMatch = s.match(/Sortie\s*:\s*(\d{1,2})\s+([a-zéûôà]+\.?)\s+(\d{4})/i);
+  if (frMatch) {
+    const [, dd, monthStr, yyyy] = frMatch;
+    const monthKey = monthStr.toLowerCase().replace(/\.$/, '').replace(/é/g, 'e');
+    const monthIdx = FRENCH_MONTHS[monthKey] ?? FRENCH_MONTHS[monthKey.substring(0, 4)];
+    if (monthIdx !== undefined) {
+      return new Date(Date.UTC(Number(yyyy), monthIdx, Number(dd))).toISOString();
+    }
+  }
+  // Try "Sortie : DD Month" (WITHOUT year — common on cotecine.fr sites)
+  // Assume the current year. If the date is more than 6 months in the past,
+  // assume next year. This handles films showing in September with "Sortie : 19 août"
+  // (released in August of the current year, not next year).
+  const frNoYearMatch = s.match(/Sortie\s*:\s*(\d{1,2})\s+([a-zéûôà]+\.?)(?!\s+\d{4})/i);
+  if (frNoYearMatch) {
+    const [, dd, monthStr] = frNoYearMatch;
+    const monthKey = monthStr.toLowerCase().replace(/\.$/, '').replace(/é/g, 'e');
+    const monthIdx = FRENCH_MONTHS[monthKey] ?? FRENCH_MONTHS[monthKey.substring(0, 4)];
+    if (monthIdx !== undefined) {
+      const now = new Date();
+      let year = now.getUTCFullYear();
+      // If the date would be more than 6 months ago, assume next year.
+      const monthDiff = (now.getUTCMonth() - monthIdx + 12) % 12;
+      if (monthDiff > 6) {
+        year++;
+      }
+      return new Date(Date.UTC(year, monthIdx, Number(dd))).toISOString();
+    }
+  }
+  return undefined;
+};
+
 // Regex matching the booking URL pattern:
 //   /reserver/F<filmId>/D<unix-seconds>/<VF|VO>/<roomId>/
 const BOOKING_URL_RE = /\/reserver\/F(\d+)\/D(\d+)\/(V[FO])\/(\d+)/;
@@ -64,22 +117,14 @@ export function createCineVoxAdapter(
 
   return {
     async fetchSchedule(_windowDays: number) {
-      const res = await fetchWithTimeout(
+      // Use browserFetch (hidden BrowserWindow) instead of plain fetchWithTimeout.
+      // cinemavox-chamonix.com may add Cloudflare protection at any time.
+      // browserFetch runs real Chromium JS which solves Cloudflare challenges
+      // automatically.
+      const html = await browserFetch(
         `${baseUrl}${schedulePath}`,
         { headers: buildHeaders(baseUrl) },
-        REQUEST_TIMEOUT_MS,
       );
-      if (!res.ok) throw new Error(`${cinemaId}: HTTP ${res.status}`);
-
-      // Consume body as ArrayBuffer ONCE, then decode.
-      // The Vox page is served as ISO-8859-1. If we decode as UTF-8,
-      // accented characters become replacement chars (�). Detect and
-      // re-decode from the same bytes.
-      const buf = await res.arrayBuffer();
-      let html = new TextDecoder('utf-8').decode(buf);
-      if (html.includes('\uFFFD')) {
-        html = new TextDecoder('iso-8859-1').decode(buf);
-      }
       const $ = cheerio.load(html);
 
       const resolveUrl = (maybeRelative: string | undefined): string | undefined => {
@@ -129,7 +174,11 @@ export function createCineVoxAdapter(
         const castingText = $film.find('.hr_cast').text().trim();
         const casting = castingText.replace(/^Avec\s*/i, '').trim() || UNKNOWN;
         const genres = $film.find('.genre strong').text().trim() || undefined;
-        const runtime = parseRuntimeMinutes($film.find('.hr_dur').text());
+        const durText = $film.find('.hr_dur').text();
+        const runtime = parseRuntimeMinutes(durText);
+        // Extract release date from "Sortie : 9 septembre 2026" or
+        // "Sortie : 09/09/2026" patterns in the .hr_dur text.
+        const release = parseReleaseDate(durText);
 
         const showtimes: Showtime[] = [];
         let hasVF = false;
@@ -223,7 +272,7 @@ export function createCineVoxAdapter(
           cinemaId,
           title, poster, direction, casting,
           synopsis: undefined,
-          genres, runtime,
+          genres, runtime, release,
           hasVF, hasVO,
           showtimes,
         });

@@ -1,6 +1,6 @@
 {
   "name": "arvecinema",
-  "version": "0.3.0",
+  "version": "0.9.0",
   "description": "Cinema showtimes app for the Arve Valley (Sallanches, Cluses, Bonneville, Chamonix)",
   "license": "BSD-3-Clause",
   "author": "ArveCinema contributors",
@@ -35,6 +35,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "format": "prettier --write \"src/**/*.{ts,tsx,html,css,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,html,css,json}\"",
+    "postinstall": "electron-builder install-app-deps",
     "package": "electron-vite build && electron-builder",
     "package:dir": "electron-vite build && electron-builder --dir",
     "package:dmg": "electron-vite build && electron-builder --mac dmg",
@@ -93,11 +94,14 @@
     ]
   },
   "dependencies": {
+    "better-sqlite3": "^11.10.0",
     "cheerio": "^1.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20.11.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@vitejs/plugin-react": "^4.3.1",

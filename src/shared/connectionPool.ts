@@ -1,4 +1,5 @@
 import { fetchWithTimeout, REQUEST_TIMEOUT_MS } from './fetchWithTimeout';
+import { withNetworkTracking } from '../main/ratings/networkActivity';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Connection pool with per-domain rate limiting + detailed logging.
@@ -11,9 +12,16 @@ import { fetchWithTimeout, REQUEST_TIMEOUT_MS } from './fetchWithTimeout';
 // when ARVE_DEBUG=1.
 // ──────────────────────────────────────────────────────────────────────────
 
+/** Format a timestamp for debug logs: HH:MM:ss.sss */
+function ts(): string {
+  const d = new Date();
+  return d.toLocaleTimeString('en-GB', { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+}
+
+
 const DEBUG = process.env.ARVE_DEBUG === '1';
 
-function debug(...args: unknown[]) { if (DEBUG) console.log('[fetch]', ...args); }
+function debug(...args: unknown[]) { if (DEBUG) console.log(`[${ts()}] [fetch]`, ...args); }
 
 interface DomainState {
   lastRequestTime: number;
@@ -35,11 +43,30 @@ export interface FetchOptions {
   domainDelayMs?: number;
   timeoutMs?: number;
   headers?: Record<string, string>;
+  /**
+   * Set to `true` for JSON API endpoints whose response may legitimately be
+   * small (<200 bytes) — e.g. a GraphQL endpoint returning an empty `data`
+   * object. When true, the Cloudflare-detection heuristic skips the
+   * byte-count floor and only triggers on the explicit Cloudflare markers.
+   *
+   * Defaults to `false` (HTML endpoints — short responses are suspicious).
+   */
+  allowShortResponse?: boolean;
+  /** HTTP method. Defaults to `'GET'`. Set to `'POST'` to send a body. */
+  method?: 'GET' | 'POST';
+  /** Request body. Used only when `method === 'POST'`. */
+  body?: string;
 }
 
 /** Fetch a URL with per-domain rate limiting and detailed logging.
- *  Returns the response text, or throws with a descriptive error. */
+ *  Returns the response text, or throws with a descriptive error.
+ *  Wrapped in `withNetworkTracking` so the renderer's refresh-icon spinner
+ *  knows when network activity is in flight. */
 export async function pooledFetch(url: string, opts: FetchOptions = {}): Promise<string> {
+  return withNetworkTracking(() => pooledFetchImpl(url, opts));
+}
+
+async function pooledFetchImpl(url: string, opts: FetchOptions = {}): Promise<string> {
   const domain = extractDomain(url);
   const delay = opts.domainDelayMs ?? DEFAULT_DOMAIN_DELAY_MS;
   const timeout = opts.timeoutMs ?? REQUEST_TIMEOUT_MS;
@@ -74,17 +101,23 @@ export async function pooledFetch(url: string, opts: FetchOptions = {}): Promise
 
     // Execute the request.
     const startTime = Date.now();
-    debug(`→ GET ${url}`);
+    const method = opts.method ?? 'GET';
+    const reqBody = opts.body;
+    debug(`→ ${method} ${url}` + (reqBody ? ` (${reqBody.length} bytes body)` : ''));
     debug(`  headers: ${JSON.stringify(headers)}`);
 
-    const res = await fetchWithTimeout(url, { headers }, timeout);
+    const res = await fetchWithTimeout(
+      url,
+      { headers, method, ...(reqBody !== undefined ? { body: reqBody } : {}) },
+      timeout,
+    );
     const elapsedMs = Date.now() - startTime;
     state.lastRequestTime = Date.now();
 
     if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      debug(`← HTTP ${res.status} in ${elapsedMs}ms (${body.length} bytes)`);
-      throw new Error(`HTTP ${res.status} — ${res.statusText}${body.length < 200 ? ': ' + body.slice(0, 200) : ''}`);
+      const errBody = await res.text().catch(() => '');
+      debug(`← HTTP ${res.status} in ${elapsedMs}ms (${errBody.length} bytes)`);
+      throw new Error(`HTTP ${res.status} — ${res.statusText}${errBody.length < 200 ? ': ' + errBody.slice(0, 200) : ''}`);
     }
 
     const text = await res.text();
@@ -96,12 +129,18 @@ export async function pooledFetch(url: string, opts: FetchOptions = {}): Promise
     // 500-byte threshold produced false positives on small but valid responses.
     // We now trigger on the explicit Cloudflare markers AND a very low floor
     // (<200 bytes, which is essentially "empty" — no real HTML page is that small).
+    //
+    // JSON API callers (e.g. the IMDB GraphQL endpoint) can opt out of the
+    // byte-count floor via `allowShortResponse: true` because their empty
+    // responses are legitimately tiny (e.g. `{"data":{"titles":[]}}` is ~30
+    // bytes) and would otherwise false-positive as a Cloudflare challenge.
+    const allowShort = opts.allowShortResponse === true;
     const isCloudflareChallenge =
       text.includes('Just a moment...') ||
       text.includes('cf-challenge') ||
       text.includes('challenge-platform') ||
       text.includes('cf-browser-verification') ||
-      text.length < 200;
+      (!allowShort && text.length < 200);
     if (isCloudflareChallenge) {
       debug(`⚠ ${domain}: Cloudflare challenge detected (${text.length} bytes)`);
       throw new Error(`Cloudflare challenge (${text.length} bytes) — likely IP-blocked`);

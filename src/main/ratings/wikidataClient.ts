@@ -1,5 +1,6 @@
 import { fetchWithTimeout, REQUEST_TIMEOUT_MS } from '../../shared/fetchWithTimeout';
 import { APP_USER_AGENT } from '../../shared/userAgent';
+import { withNetworkTracking } from './networkActivity';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Wikidata client — public, free, no API key required.
@@ -72,9 +73,9 @@ export async function findByAllocineId(
     const url = new URL(WIKIDATA_SPARQL);
     url.searchParams.set('query', query);
     url.searchParams.set('format', 'json');
-    const res = await fetchWithTimeout(url.toString(), {
+    const res = await withNetworkTracking(() => fetchWithTimeout(url.toString(), {
       headers: SPARQL_HEADERS,
-    }, REQUEST_TIMEOUT_MS);
+    }, REQUEST_TIMEOUT_MS));
     if (!res.ok) return null;
     const data = await res.json() as SparqlResult;
     const bindings = data.results?.bindings ?? [];
@@ -133,9 +134,9 @@ async function searchEntities(title: string, language = 'fr'): Promise<WbSearchR
   url.searchParams.set('type', 'item');
 
   try {
-    const res = await fetchWithTimeout(url.toString(), {
+    const res = await withNetworkTracking(() => fetchWithTimeout(url.toString(), {
       headers: HEADERS,
-    }, REQUEST_TIMEOUT_MS);
+    }, REQUEST_TIMEOUT_MS));
     if (!res.ok) return [];
     const data = await res.json() as { search?: WbSearchResult[] };
     return data.search ?? [];
@@ -155,9 +156,9 @@ async function getFilmIds(qid: string): Promise<WikidataIds | null> {
   url.searchParams.set('languages', 'fr|en');
 
   try {
-    const res = await fetchWithTimeout(url.toString(), {
+    const res = await withNetworkTracking(() => fetchWithTimeout(url.toString(), {
       headers: HEADERS,
-    }, REQUEST_TIMEOUT_MS);
+    }, REQUEST_TIMEOUT_MS));
     if (!res.ok) return null;
     const data = await res.json() as WbGetEntitiesResult;
     const entity = data.entities?.[qid];
@@ -222,7 +223,9 @@ export async function findByTitle(
   const cleanTitle = title
     .replace(/^En\s+avant-première\s+/i, '')
     .replace(/\s+Extended\s*$/i, '')
+    .replace(/\s+Final\s+Cut\s*$/i, '')
     .replace(/\s+Version\s+Longue\s*$/i, '')
+    .replace(/\s+Director'?s?\s+Cut\s*$/i, '')
     .replace(/^Avant-première\s*:\s*/i, '')
     .replace(/^Avant-première\s+/i, '')
     .trim();
@@ -263,6 +266,14 @@ export async function findByTitle(
 
 function normalizeTitle(s: string): string {
   return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    // Strip subtitle markers that don't change the film's identity
+    // (e.g. " - partie 1 : L'Âge de Fer", "Final Cut", "Extended").
+    .replace(/\s*[-:]\s*partie\s+\d+\s*[:\-]?\s*/g, ' ')
+    .replace(/\s*[-:]\s*part\s+\d+\s*[:\-]?\s*/g, ' ')
+    .replace(/\s+final\s*cut\s*$/i, '')
+    .replace(/\s+extended\s*$/i, '')
+    .replace(/\s+version\s+longue\s*$/i, '')
+    .replace(/\s*[:\-]\s*/g, ' ')
     .replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
@@ -270,7 +281,19 @@ function isCoherentTitle(expected: string, got: string): boolean {
   const a = normalizeTitle(expected);
   const b = normalizeTitle(got);
   if (!a || !b) return false;
-  return a === b || a.startsWith(b) || b.startsWith(a) || levenshtein(a, b) <= Math.max(3, Math.floor(Math.max(a.length, b.length) * 0.2));
+  if (a === b) return true;
+  if (a.startsWith(b) || b.startsWith(a)) return true;
+  // Token-subset match (same logic as in ratingsEnricher.ts) — accept when
+  // all tokens of the shorter title appear in the longer one. Catches the
+  // case where one source includes a subtitle the other omits.
+  const aTokens = a.split(' ').filter(t => t.length > 2);
+  const bTokens = b.split(' ').filter(t => t.length > 2);
+  const [shorter, longer] = aTokens.length <= bTokens.length ? [aTokens, bTokens] : [bTokens, aTokens];
+  if (shorter.length >= 3) {
+    const longerSet = new Set(longer);
+    if (shorter.every(t => longerSet.has(t))) return true;
+  }
+  return levenshtein(a, b) <= Math.max(3, Math.floor(Math.max(a.length, b.length) * 0.25));
 }
 
 function descriptionMentionsYear(description: string | undefined, year: number): boolean {
@@ -309,6 +332,120 @@ export async function findMovieIds(movie: {
   return findByTitle(movie.title, movie.year);
 }
 
+// ── Batch lookup by multiple AlloCiné IDs ──────────────────────────────────
+//
+// Instead of firing one SPARQL query per film (which triggers Wikidata's
+// rate limiting — HTTP 429), we batch up to 50 AlloCiné IDs into a single
+// SPARQL query using the VALUES clause. This reduces 20+ queries to 1.
+//
+// The enricher calls this function for all unresolved films that have
+// AlloCiné IDs, then falls back to per-film title search for the remaining
+// films that don't have an AlloCiné ID.
+
+/** Batch lookup: given a map of allocineId → expectedYear, return a map of
+ *  allocineId → WikidataIds for all matches found. */
+export async function findByAllocineIdsBatch(
+  entries: Array<{ allocineId: string; expectedYear?: number }>,
+): Promise<Map<string, WikidataIds>> {
+  const result = new Map<string, WikidataIds>();
+  if (entries.length === 0) return result;
+
+  // Split into batches of 50 (Wikidata SPARQL has a practical limit on
+  // VALUES clause size).
+  const BATCH_SIZE = 50;
+
+  for (let i = 0; i < entries.length; i += BATCH_SIZE) {
+    const batch = entries.slice(i, i + BATCH_SIZE);
+    const valuesClause = batch
+      .map(e => `"${e.allocineId}"`)
+      .join(' ');
+
+    const query = `SELECT ?item ?itemLabel ?itemDescription ?imdbId ?tmdbId ?rtPath ?releaseDate ?allocineId WHERE {
+      VALUES ?allocineId { ${valuesClause} }
+      ?item wdt:P1265 ?allocineId.
+      ?item wdt:P31/wdt:P279* wd:Q11424.
+      OPTIONAL { ?item wdt:P345 ?imdbId. }
+      OPTIONAL { ?item wdt:P4947 ?tmdbId. }
+      OPTIONAL { ?item wdt:P1258 ?rtPath. }
+      OPTIONAL { ?item wdt:P577 ?releaseDate. }
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "fr,en". }
+    } LIMIT 250`;
+
+    try {
+      const url = new URL(WIKIDATA_SPARQL);
+      url.searchParams.set('query', query);
+      url.searchParams.set('format', 'json');
+      const res = await withNetworkTracking(() => fetchWithTimeout(url.toString(), {
+        headers: SPARQL_HEADERS,
+      }, REQUEST_TIMEOUT_MS * 2));   // 2x timeout for batch queries
+
+      if (!res.ok) {
+        console.warn(`[wikidata] batch SPARQL returned HTTP ${res.status} for ${batch.length} IDs`);
+        continue;   // Don't fail the whole batch — fall back to per-film lookup
+      }
+
+      const data = await res.json() as SparqlBatchResult;
+      const bindings = data.results?.bindings ?? [];
+
+      // Group bindings by allocineId
+      const byAllocine = new Map<string, SparqlBinding[]>();
+      for (const b of bindings) {
+        const acId = b.allocineId?.value;
+        if (!acId) continue;
+        if (!byAllocine.has(acId)) byAllocine.set(acId, []);
+        byAllocine.get(acId)!.push(b);
+      }
+
+      // For each requested allocineId, pick the best binding (by year if available)
+      for (const entry of batch) {
+        const candidates = byAllocine.get(entry.allocineId);
+        if (!candidates || candidates.length === 0) continue;
+
+        let best = candidates[0];
+        if (entry.expectedYear !== undefined && candidates.length > 1) {
+          for (const b of candidates) {
+            if (b.releaseDate?.value) {
+              const bindingYear = new Date(b.releaseDate.value).getUTCFullYear();
+              if (Math.abs(bindingYear - entry.expectedYear) <= 1) {
+                best = b;
+                break;
+              }
+            }
+          }
+        }
+
+        const r = best;
+        const qid = r.item.value.split('/').pop()!;
+        result.set(entry.allocineId, {
+          qid,
+          imdbId: r.imdbId?.value,
+          tmdbId: r.tmdbId?.value,
+          rtPath: r.rtPath?.value,
+          allocineId: entry.allocineId,
+          title: r.itemLabel?.value ?? '',
+          description: r.itemDescription?.value,
+          wikidataUrl: `https://www.wikidata.org/wiki/${qid}`,
+        });
+      }
+
+      if (process.env.ARVE_DEBUG === '1') {
+        console.log(`[wikidata] batch SPARQL: found ${result.size}/${entries.length} IDs in this batch`);
+      }
+    } catch (err) {
+      console.warn(`[wikidata] batch SPARQL failed:`, err);
+      // Fall through — films in this batch will be retried individually
+      // by the enricher's per-film title search fallback.
+    }
+
+    // Brief delay between batches to be respectful to Wikidata's servers.
+    if (i + BATCH_SIZE < entries.length) {
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
+
+  return result;
+}
+
 // ── Wikidata API response types ─────────────────────────────────────────────
 
 interface SparqlResult {
@@ -322,6 +459,23 @@ interface SparqlResult {
       rtPath?: { value: string };
       releaseDate?: { value: string };
     }>;
+  };
+}
+
+interface SparqlBinding {
+  item: { value: string };
+  itemLabel?: { value: string };
+  itemDescription?: { value: string };
+  imdbId?: { value: string };
+  tmdbId?: { value: string };
+  rtPath?: { value: string };
+  releaseDate?: { value: string };
+  allocineId?: { value: string };
+}
+
+interface SparqlBatchResult {
+  results?: {
+    bindings: SparqlBinding[];
   };
 }
 

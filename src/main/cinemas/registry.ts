@@ -1,7 +1,8 @@
 import type { Cinema } from './types';
 import type { CinemaInfo } from '../../shared/types';
 import { createBoxOfficeApiAdapter } from './boxOfficeApiAdapter';
-import { createCineChateauAdapter } from './cineChateauAdapter';
+// cineChateauAdapter is no longer imported — Bonneville now uses boxOfficeApi.
+// See cineChateauAdapter.ts for the sleeping backup.
 import { createCineVoxAdapter } from './cineVoxAdapter';
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -17,17 +18,16 @@ import { createCineVoxAdapter } from './cineVoxAdapter';
 //   - color     : hex color used for the cinema badge on each showtime chip
 //   - adapter   : an object implementing CinemaAdapter (see types.ts)
 //
-// Two adapter factories are provided out of the box:
+// Adapter factories:
 //   - createBoxOfficeApiAdapter  — for any gatsby-source-boxofficeapi site
-//                                  (Mont-Blanc, Cluses, …). Only requires
-//                                  baseUrl + theaterId.
-//   - createCineChateauAdapter   — for cinechateau.fr (Bonneville). HTML
-//                                  scraping. Only requires baseUrl.
+//                                  (Mont-Blanc, Cluses, Bonneville). Only
+//                                  requires baseUrl + theaterId.
+//   - createCineChateauAdapter   — ⚠️ Sleeping backup. cinechateau.fr has
+//                                  been redesigned to a Gatsby/boxOfficeApi
+//                                  site. The old HTML scraper no longer works.
 //   - createCineVoxAdapter       — for cinemavox-chamonix.com (Chamonix).
-//                                  Same HTML structure as cinechateau but
-//                                  ISO-8859-1 encoded; uses the booking
-//                                  URL's embedded Unix timestamp for exact
-//                                  dates (no day-tab inference needed).
+//                                  HTML scraping with ISO-8859-1 + booking
+//                                  URL timestamp-based date resolution.
 // ──────────────────────────────────────────────────────────────────────────
 
 export const CINEMAS: Cinema[] = [
@@ -56,8 +56,12 @@ export const CINEMAS: Cinema[] = [
     name: 'Ciné Château',
     city: 'Bonneville',
     color: '#10b981',
-    adapter: createCineChateauAdapter('bonneville', {
+    // cinechateau.fr has been redesigned to a Gatsby 5.14.6 site using
+    // the same boxOfficeApi as Mont-Blanc and Cluses. Theater ID: W7412.
+    // The old cotecine.fr HTML scraper (cineChateauAdapter) is obsolete.
+    adapter: createBoxOfficeApiAdapter('bonneville', {
       baseUrl: 'https://www.cinechateau.fr',
+      theaterId: 'W7412',
     }),
   },
   {

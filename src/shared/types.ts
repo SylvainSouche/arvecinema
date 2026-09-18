@@ -188,6 +188,23 @@ declare global {
         movieId: string;
         ratings: Record<string, unknown>;
       }) => void) => () => void;
+      /** Enrichment progress: fires whenever a film finishes processing
+       *  (either scraped or cache-hit). When `resolved === total`, the
+       *  enrichment is complete. Returns an unsubscribe function. */
+      onRatingsProgress: (callback: (data: {
+        resolved: number;
+        total: number;
+        pct: number;
+      }) => void) => () => void;
+      /** Network activity state: fires `true` when any network operation
+       *  starts (browserFetch, pooledFetch, dataset download) and `false`
+       *  when all in-flight operations complete. Used to animate the
+       *  refresh icon as a spinner. Returns an unsubscribe function. */
+      onNetworkActivity: (callback: (active: boolean) => void) => () => void;
+      /** DEV-ONLY: probe the IMDB Top 250 GraphQL endpoint. */
+      probeTop250?: () => Promise<string>;
+      /** DEV-ONLY: fetch ALL movies from ALL cinemas for export. */
+      exportAll?: () => Promise<{ movies: Movie[]; cinemaStatuses: CinemaStatus[] }>;
     };
   }
 }
