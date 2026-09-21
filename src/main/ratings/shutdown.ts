@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { BrowserWindow } from 'electron';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Shutdown coordinator — ensures all background work is stopped and all
@@ -30,39 +30,50 @@ export function requestCancellation(): void {
   cancelled = true;
 }
 
-/** Perform graceful shutdown:
- *   1. Set the cancellation flag (stops enrichment workers)
- *   2. Destroy all hidden BrowserWindows (stops browserFetch)
- *   3. Close the SQLite DB connection (flushes WAL)
- *   4. Give the event loop 500ms to settle
- *   5. Force-exit if still alive
+/** Perform graceful shutdown — SYNCHRONOUS, no awaits.
  *
- *  Call from `app.on('window-all-closed')` or `app.on('before-quit')`. */
-export async function gracefulShutdown(): Promise<void> {
+ * Every step is wrapped in try/catch so one failure doesn't block the
+ * next. The function ends with process.exit(0) which kills the process
+ * immediately — no waiting for in-flight HTTP requests, no waiting for
+ * Electron cleanup hooks.
+ *
+ * Call from `app.on('window-all-closed')` or `app.on('before-quit')`. */
+export function gracefulShutdown(): void {
   // Step 1: signal all background workers to stop.
   requestCancellation();
 
-  // Step 2: destroy ALL BrowserWindows except the main window (which is
-  // already closing). This kills any in-flight browserFetch/browserGraphqlFetch
-  // hidden windows immediately — we don't care about their results anymore.
+  // Step 2: destroy ALL BrowserWindows (main + hidden browserFetch windows).
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
       try { win.destroy(); } catch { /* ignore */ }
     }
   }
 
-  // Step 3: close the SQLite DB connection. Imported lazily so this module
-  // doesn't create a circular dependency at load time.
+  // Step 3: close the SQLite DB connection (synchronous — better-sqlite3).
   try {
-    const { closeCacheDb } = await import('./cacheDb');
+    // Use require() not import() — these modules are already loaded,
+    // and require() is synchronous so we don't risk hanging on a
+    // never-resolving promise.
+    const { closeCacheDb } = require('./cacheDb');
     closeCacheDb();
   } catch { /* DB not open or already closed */ }
 
-  // Step 4: give the event loop a brief moment to let pending timers
-  // (setTimeout, setInterval) fire their cleanup callbacks.
-  await new Promise(r => setTimeout(r, 200));
+  // Step 4: flush log dispatchers (synchronous).
+  try {
+    const { flushLogs } = require('./logger');
+    flushLogs();
+  } catch { /* logger not initialized */ }
 
-  // Step 5: if the process is still alive (some timer or handle is keeping
-  // it), force-exit. app.exit(0) runs Electron's cleanup hooks before dying.
-  app.exit(0);
+  // Step 5: save recorded network fixture (if ARVE_RECORD was set).
+  try {
+    const { saveRecordedFixture } = require('./networkRecorder');
+    saveRecordedFixture();
+  } catch { /* recorder not loaded */ }
+
+  // Step 6: FORCE EXIT — don't wait for in-flight HTTP requests,
+  // enrichment workers, or Electron cleanup. The cancellation flag
+  // (Step 1) tells workers to stop, but they may be stuck on a
+  // fetchWithTimeout/browserFetch call that won't resolve for up to
+  // 20 seconds. We don't wait — just kill the process.
+  process.exit(0);
 }

@@ -23,23 +23,45 @@ interface Props {
 
 /** The always-visible filter bar: search + audio version pills + hour slider + sort. */
 export const FilterBar: React.FC<Props> = ({
-  audioFilter, setAudioFilter,
-  minHour, setMinHour, maxHour, setMaxHour,
-  hourBounds, search, setSearch,
-  sortMode, setSortMode,
+  audioFilter,
+  setAudioFilter,
+  minHour,
+  setMinHour,
+  maxHour,
+  setMaxHour,
+  hourBounds,
+  search,
+  setSearch,
+  sortMode,
+  setSortMode,
 }) => {
   return (
-    <div style={{
-      padding: '12px 24px',
-      borderBottom: '1px solid var(--border)',
-      display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap',
-    }}>
+    <div
+      style={{
+        padding: '12px 24px',
+        borderBottom: '1px solid var(--border)',
+        display: 'flex',
+        gap: 24,
+        alignItems: 'center',
+        flexWrap: 'wrap',
+      }}
+    >
       {/* Search input — matches against title + director + cast */}
       <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 220, maxWidth: 360 }}>
-        <span aria-hidden style={{
-          position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
-          color: 'var(--text-muted)', fontSize: 14, pointerEvents: 'none',
-        }}>🔍</span>
+        <span
+          aria-hidden
+          style={{
+            position: 'absolute',
+            left: 12,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            color: 'var(--text-muted)',
+            fontSize: 14,
+            pointerEvents: 'none',
+          }}
+        >
+          🔍
+        </span>
         <input
           type="search"
           value={search}
@@ -57,19 +79,33 @@ export const FilterBar: React.FC<Props> = ({
             outline: 'none',
             transition: 'border-color 0.15s',
           }}
-          onFocus={(e) => { e.currentTarget.style.borderColor = '#555'; }}
-          onBlur={(e) => { e.currentTarget.style.borderColor = '#333'; }}
+          onFocus={(e) => {
+            e.currentTarget.style.borderColor = '#555';
+          }}
+          onBlur={(e) => {
+            e.currentTarget.style.borderColor = '#333';
+          }}
         />
         {search && (
           <button
             onClick={() => setSearch('')}
-            aria-label="Effacer"
+            aria-label={t('clear')}
             style={{
-              position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
-              background: 'transparent', border: 'none', color: 'var(--text-muted)',
-              cursor: 'pointer', fontSize: 16, padding: '4px 8px', lineHeight: 1,
+              position: 'absolute',
+              right: 6,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-muted)',
+              cursor: 'pointer',
+              fontSize: 16,
+              padding: '4px 8px',
+              lineHeight: 1,
             }}
-          >×</button>
+          >
+            ×
+          </button>
         )}
       </div>
 
@@ -100,22 +136,29 @@ export const FilterBar: React.FC<Props> = ({
 
       {/* Double min/max hour slider — quarter-hour steps */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <span style={{ color: 'var(--text-muted)', fontSize: 13, flex: '0 0 auto' }}>{t('hourRange')} :</span>
+        <span style={{ color: 'var(--text-muted)', fontSize: 13, flex: '0 0 auto' }}>
+          {t('hourRange')} :
+        </span>
         <DoubleRangeSlider
           min={hourBounds.min}
           max={hourBounds.max}
           step={0.25}
           valueMin={minHour}
           valueMax={maxHour}
-          onChange={(vMin, vMax) => { setMinHour(vMin); setMaxHour(vMax); }}
+          onChange={(vMin, vMax) => {
+            setMinHour(vMin);
+            setMaxHour(vMax);
+          }}
         />
-        <span style={{
-          color: 'var(--text-primary)',
-          fontVariantNumeric: 'tabular-nums',
-          fontSize: 13,
-          minWidth: 110,
-          fontWeight: 600,
-        }}>
+        <span
+          style={{
+            color: 'var(--text-primary)',
+            fontVariantNumeric: 'tabular-nums',
+            fontSize: 13,
+            minWidth: 110,
+            fontWeight: 600,
+          }}
+        >
           {formatHour(minHour)} – {formatHour(maxHour)}
         </span>
       </div>

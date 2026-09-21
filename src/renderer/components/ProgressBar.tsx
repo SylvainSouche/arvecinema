@@ -1,4 +1,5 @@
 import React from 'react';
+import { tFmt } from '../../shared/i18n';
 
 // ──────────────────────────────────────────────────────────────────────────
 // ProgressBar — 3px-high progress bar pinned to the bottom of the window.
@@ -28,23 +29,23 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({ resolved, total, pct }
         right: 0,
         height: 3,
         background: 'var(--bg-card-2)',
-        zIndex: 999,
+        zIndex: 'var(--z-progress)',
         overflow: 'hidden',
       }}
       role="progressbar"
       aria-valuenow={pct}
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-label={`Ratings: ${resolved}/${total}`}
+      aria-label={tFmt('ratingsProgress', { resolved, total })}
     >
       {/* Filled portion — animated width transition */}
       <div
         style={{
           height: '100%',
           width: `${pct}%`,
-          background: 'linear-gradient(90deg, #4a9eff 0%, #6cb5ff 100%)',
-          transition: 'width 200ms ease-out',
-          boxShadow: '0 0 8px rgba(74, 158, 255, 0.6)',
+          background: `linear-gradient(90deg, var(--brand-accent) 0%, #6cb5ff 100%)`,
+          transition: 'width var(--transition-slow)',
+          boxShadow: 'var(--shadow-glow)',
         }}
       />
     </div>

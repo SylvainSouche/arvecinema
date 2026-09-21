@@ -5,6 +5,7 @@
 
 import { TIMEZONE } from './types';
 import type { CinemaInfo } from './types';
+import { cleanTitle as applyTitleRules } from './titleRules';
 
 // ── Date / hour helpers ──────────────────────────────────────────────────
 
@@ -39,11 +40,13 @@ export const toIsoDay = (d: Date): string => {
   // of the host machine's local timezone.
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: TIMEZONE,
-    year: 'numeric', month: '2-digit', day: '2-digit',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
   }).formatToParts(d);
-  const y = parts.find(p => p.type === 'year')!.value;
-  const m = parts.find(p => p.type === 'month')!.value;
-  const day = parts.find(p => p.type === 'day')!.value;
+  const y = parts.find((p) => p.type === 'year')!.value;
+  const m = parts.find((p) => p.type === 'month')!.value;
+  const day = parts.find((p) => p.type === 'day')!.value;
   return `${y}-${m}-${day}`;
 };
 
@@ -87,7 +90,9 @@ export const formatHour = (h: number): string => {
  * re-projected to Europe/Paris, which shifted the date by one day on
  * hosts east of UTC+3.
  */
-export const formatDayShort = (iso: string): {
+export const formatDayShort = (
+  iso: string,
+): {
   weekday: string;
   dayNum: string;
   month: string;
@@ -106,11 +111,11 @@ export const formatDayShort = (iso: string): {
 
 /** Returns the cinema's color, or a neutral gray if not found. */
 export const cinemaColor = (cinemas: CinemaInfo[], id: string): string =>
-  cinemas.find(c => c.id === id)?.color ?? '#888';
+  cinemas.find((c) => c.id === id)?.color ?? '#888';
 
 /** Returns the cinema's display name, or the raw id if not found. */
 export const cinemaName = (cinemas: CinemaInfo[], id: string): string =>
-  cinemas.find(c => c.id === id)?.name ?? id;
+  cinemas.find((c) => c.id === id)?.name ?? id;
 
 // ── Search normalization ──────────────────────────────────────────────────
 
@@ -120,9 +125,26 @@ export const cinemaName = (cinemas: CinemaInfo[], id: string): string =>
  *   "Réalisateur"        → "realisateur"
  */
 export const normalize = (s: string): string =>
-  s.toLowerCase()
-    .replace(/[\u2018\u2019\u201b]/g, "'")   // normalize curly apostrophes to straight
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  s
+    .toLowerCase()
+    .replace(/[\u2018\u2019\u201b]/g, "'") // normalize curly apostrophes to straight
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+/**
+ * Normalize a movie title for deduplication — uses the systematic
+ * title-cleaning rules from `titleRules/` to strip cinema-event
+ * prefixes/suffixes (avant-première, soirée spéciale, extended, director's
+ * cut, final cut, version longue, opera, live, etc.).
+ *
+ * This ensures that:
+ *   "En avant-première Heart Of The Beast" deduplicates with "Heart Of The Beast"
+ *   "Avengers : Endgame Extended" deduplicates with "Avengers Endgame"
+ *   "Così fan tutte (Metropolitan Opera)" deduplicates with "Così fan tutte"
+ */
+export const dedupTitle = (s: string): string => {
+  return applyTitleRules(s).cleaned;
+};
 
 // ── French weekday helpers (used by the cinechateau HTML scraper) ──────────
 

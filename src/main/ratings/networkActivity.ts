@@ -41,13 +41,19 @@ export function getNetworkActive(): boolean {
   return inflightCount > 0;
 }
 
-/** Wrap a Promise-returning function with network activity tracking. */
+/** Wrap a Promise-returning function with network activity tracking.
+ *
+ *  Note: trackNetworkStart/End may throw if BrowserWindow isn't ready yet
+ *  (e.g. on the very first network call during app startup). We catch those
+ *  errors silently — network tracking is a UI nicety, not critical to the
+ *  fetch itself. The actual fetch (fn) always runs and its result/error
+ *  is always propagated. */
 export async function withNetworkTracking<T>(fn: () => Promise<T>): Promise<T> {
-  trackNetworkStart();
+  try { trackNetworkStart(); } catch { /* BrowserWindow not ready — ignore */ }
   try {
     return await fn();
   } finally {
-    trackNetworkEnd();
+    try { trackNetworkEnd(); } catch { /* ignore */ }
   }
 }
 

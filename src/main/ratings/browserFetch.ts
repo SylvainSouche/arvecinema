@@ -1,15 +1,27 @@
 import { BrowserWindow, session } from 'electron';
 import { withNetworkTracking } from './networkActivity';
+import { log } from './moduleLoggers';
+import { isReplaying, isRecording, getReplayResponse, recordResponse } from './networkRecorder';
 
 // ──────────────────────────────────────────────────────────────────────────
 // browserFetch — fetch a URL using a hidden Electron BrowserWindow.
 //
 // Bypasses Cloudflare by loading the page in a real Chromium browser.
 // Key anti-detection measures:
-//   - images: true (Cloudflare detects bots that skip images)
 //   - sandbox: true (real browser sandbox)
 //   - Real User-Agent from the session (not a custom UA that looks fake)
 //   - Wait for navigation to settle (challenge → redirect → real page)
+//
+// POOL: windows are pooled per-domain. A hidden BrowserWindow created for
+// allocine.fr is kept alive after the fetch and reused for the next call to
+// allocine.fr. This eliminates the ~500ms Chromium-init overhead per call.
+// The Cloudflare cf_clearance cookie persists in the session partition
+// (per-domain), so pooled windows also skip the Cloudflare challenge on
+// subsequent calls.
+//
+// When the pool is empty (first call to a domain, or after a crash), a new
+// window is created. When a window crashes, it's destroyed and removed from
+// the pool — the next call will create a fresh one.
 // ──────────────────────────────────────────────────────────────────────────
 
 const DEBUG = process.env.ARVE_DEBUG === '1';
@@ -18,7 +30,19 @@ const NAVIGATION_TIMEOUT_MS = 20_000;
 /** Format a timestamp for debug logs: HH:MM:ss.sss */
 function ts(): string {
   const d = new Date();
-  return d.toLocaleTimeString('en-GB', { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+  return (
+    d.toLocaleTimeString('en-GB', { hour12: false }) +
+    '.' +
+    String(d.getMilliseconds()).padStart(3, '0')
+  );
+}
+
+function extractDomain(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return 'default';
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -82,83 +106,131 @@ const BLOCKED_DOMAIN_PATTERNS = [
 function shouldBlockUrl(url: string): boolean {
   try {
     const hostname = new URL(url).hostname;
-    return BLOCKED_DOMAIN_PATTERNS.some(
-      d => hostname === d || hostname.endsWith('.' + d),
-    );
+    return BLOCKED_DOMAIN_PATTERNS.some((d) => hostname === d || hostname.endsWith('.' + d));
   } catch {
     return false;
   }
 }
 
-/** Install the ad-blocker on a session. Returns a disposer that removes the listener. */
-function installAdBlocker(ses: Electron.Session): () => void {
-  // onBeforeRequest fires for every network request (main frame, sub-frame,
-  // image, script, XHR, fetch, etc.). We return { cancel: true } for
-  // tracker domains — the request never leaves the process.
-  //
-  // NOTE: Electron's onBeforeRequest returns `void` (not a filter object)
-  // when using the callback form. To dispose, we use the same session's
-  // `webRequest` API to clear the listener. The listener is auto-cleared
-  // when the session's last referencing BrowserWindow is destroyed, but we
-  // also keep a manual disposer for explicit teardown.
-  ses.webRequest.onBeforeRequest(
-    (details, callback) => {
-      if (shouldBlockUrl(details.url)) {
-        if (DEBUG && Math.random() < 0.05) {
-          // Sample 5% of blocks to avoid log spam when many trackers fire at once.
-          console.log(`[${ts()}] [browserFetch] blocked tracker: ${details.url.substring(0, 80)}...`);
-        }
-        callback({ cancel: true });
-      } else {
-        callback({});
+/** Install the ad-blocker on a session. Called once per session (sessions
+ *  are per-domain and persistent — the blocker lives for the app's lifetime). */
+function installAdBlocker(ses: Electron.Session): void {
+  ses.webRequest.onBeforeRequest((details, callback) => {
+    if (shouldBlockUrl(details.url)) {
+      if (DEBUG && Math.random() < 0.05) {
+        log.browserFetch.info(
+          `[${ts()}] [browserFetch] blocked tracker: ${details.url.substring(0, 80)}...`,
+        );
       }
-    },
-  );
-  // Return a disposer that clears all onBeforeRequest listeners on the session.
-  return () => {
-    try { ses.webRequest.onBeforeRequest(() => {}); } catch { /* ignore */ }
-  };
+      callback({ cancel: true });
+    } else {
+      callback({});
+    }
+  });
 }
 
-/** Returns true if `url` is on the same registrable domain as `initialUrl`. */
-function isSameRegistrableDomain(initialUrl: string, url: string): boolean {
-  try {
-    const initialHost = new URL(initialUrl).hostname;
-    const redirectHost = new URL(url).hostname;
-    return redirectHost === initialHost ||
-      redirectHost.endsWith('.' + initialHost) ||
-      initialHost.endsWith('.' + redirectHost);
-  } catch {
-    return false;
+// ── Per-domain session setup (once per session lifetime) ───────────────────
+
+/** Tracks which session partitions have already been configured
+ *  (ad-blocker + permission handlers). Sessions are per-domain and persist
+ *  for the app's lifetime, so we only set up each one once. */
+const configuredPartitions = new Set<string>();
+
+function ensureSessionSetup(partition: string, ses: Electron.Session): void {
+  if (configuredPartitions.has(partition)) return;
+  configuredPartitions.add(partition);
+  installAdBlocker(ses);
+  ses.setPermissionRequestHandler(() => false);
+  ses.setPermissionCheckHandler(() => false);
+  if (DEBUG)
+    log.browserFetch.info(`[${ts()}] [browserFetch] session setup for partition "${partition}"`);
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// BrowserWindow pool — one idle window per domain.
+//
+// When browserFetch() is called:
+//   1. Check if there's an idle window for this domain.
+//   2. If yes → reuse it (skip ~500ms Chromium-init cost).
+//   3. If no → create a new window.
+//   4. After the fetch completes, return the window to the pool.
+//   5. If the window crashed or is in a bad state, destroy it instead.
+//
+// Pool size: 1 per domain. If a second concurrent call arrives while the
+// pooled window is busy, a TEMPORARY window is created and destroyed after
+// use (same behavior as before pooling). This keeps the pool simple — no
+// queueing, no deadlocks.
+//
+// The connection pool's per-domain delay (2s) already serializes most
+// calls to the same domain, so 1 pooled window handles the common case.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Idle windows indexed by domain. At most 1 entry per domain. */
+const idleWindows = new Map<string, BrowserWindow>();
+
+/** Check if a window is healthy enough to reuse. */
+function isHealthy(win: BrowserWindow): boolean {
+  return !win.isDestroyed() && !win.webContents.isDestroyed();
+}
+
+/** Acquire a BrowserWindow for a domain. Reuses from pool if available,
+ *  otherwise creates a new one. The caller MUST call releaseWindow() when done. */
+function acquireWindow(domain: string, partition: string): BrowserWindow {
+  const idle = idleWindows.get(domain);
+  if (idle && isHealthy(idle)) {
+    idleWindows.delete(domain);
+    if (DEBUG) log.browserFetch.info(`[${ts()}] [browserFetch] pool: reused window for ${domain}`);
+    return idle;
+  }
+  // Remove stale entry if the idle window was unhealthy
+  if (idle) {
+    idleWindows.delete(domain);
+    try {
+      idle.destroy();
+    } catch {
+      /* already destroyed */
+    }
+  }
+  // Create a new window
+  return createPooledWindow(partition);
+}
+
+/** Return a window to the pool. If `crashed`, destroy instead of pooling. */
+function releaseWindow(domain: string, win: BrowserWindow, crashed: boolean): void {
+  if (crashed || !isHealthy(win)) {
+    if (!win.isDestroyed()) {
+      try {
+        win.destroy();
+      } catch {
+        /* ignore */
+      }
+    }
+    idleWindows.delete(domain);
+    return;
+  }
+  // Return to pool — but only if there isn't already one for this domain
+  // (concurrent calls might both try to release to the same domain).
+  if (idleWindows.has(domain)) {
+    try {
+      win.destroy();
+    } catch {
+      /* ignore */
+    }
+    if (DEBUG)
+      log.browserFetch.info(
+        `[${ts()}] [browserFetch] pool: destroyed extra window for ${domain} (pool full)`,
+      );
+  } else {
+    idleWindows.set(domain, win);
+    if (DEBUG)
+      log.browserFetch.info(`[${ts()}] [browserFetch] pool: returned window to pool for ${domain}`);
   }
 }
 
-/** Fetch a URL via a hidden BrowserWindow. Returns the full page HTML.
- *  Wrapped in `withNetworkTracking` so the renderer's refresh-icon spinner
- *  knows when network activity is in flight. */
-export async function browserFetch(
-  url: string,
-  _opts: { headers?: Record<string, string>; referer?: string } = {},
-): Promise<string> {
-  return withNetworkTracking(() => browserFetchImpl(url, _opts));
-}
-
-async function browserFetchImpl(
-  url: string,
-  _opts: { headers?: Record<string, string>; referer?: string } = {},
-): Promise<string> {
-  // Capture the initial URL for redirect-policy enforcement below — we only
-  // allow redirects within the same registrable domain as the original target.
-  const initialUrl = url;
-
-  // Use a persistent partition per-domain so Cloudflare cookies persist
-  // between requests to the same site (Cloudflare sets a cf_clearance
-  // cookie that lasts ~30 min — reusing it means subsequent requests
-  // skip the challenge entirely).
-  const domain = extractDomain(url);
-  const partition = `browserfetch-${domain}`;
-
+/** Create a new hidden BrowserWindow configured for scraping. */
+function createPooledWindow(partition: string): BrowserWindow {
   const ses = session.fromPartition(partition);
+  ensureSessionSetup(partition, ses);
 
   const win = new BrowserWindow({
     show: false,
@@ -170,53 +242,97 @@ async function browserFetchImpl(
       sandbox: true,
       nodeIntegration: false,
       // Disable images — Cloudflare's `cf_clearance` cookie is set by
-      // JavaScript execution (challenge.js), NOT by image loading. We
-      // verified this works with `browserGraphqlFetch` (which already
-      // uses `images: false`). Disabling images:
+      // JavaScript execution (challenge.js), NOT by image loading.
+      // Disabling images:
       //   - Cuts page load time from ~2-5s to ~500ms (no poster/ad fetches)
-      //   - Eliminates the noisy `ffmpeg_common.cc: Unsupported pixel
-      //     format: -1` errors (Chromium trying to decode AVIF/HEIC images)
+      //   - Eliminates noisy `ffmpeg_common.cc: Unsupported pixel format` errors
       //   - Reduces bandwidth (each imdb/allocine page loads ~20-50 images)
-      //   - Skips the ad network's image-based tracking pixels entirely
+      //   - Skips ad network image-based tracking pixels entirely
       images: false,
       javascript: true,
     },
   });
 
-  // Harden the hidden window: deny all window-open + navigation + permission
-  // requests. This window is only ever used to load ONE URL we control (the
-  // Cloudflare-protected page we're scraping); any other navigation is by
-  // definition an attack vector (e.g. a malicious redirect from a
-  // compromised page trying to escape the hidden window).
-  //
-  // EXCEPTION: same-registrable-domain navigations are allowed, because
-  // Cloudflare/AWS WAF challenge scripts often call window.location.reload()
-  // to apply the freshly minted cookie. Without this exception, the WAF
-  // reload gets blocked and the cookie is never set.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    console.warn(`[${ts()}] [browserFetch] blocked window-open to: ${url}`);
-    return { action: 'deny' };
-  });
-  win.webContents.on('will-navigate', (event, url) => {
-    if (isSameRegistrableDomain(initialUrl, url)) return;  // allow WAF reload
-    event.preventDefault();
-    console.warn(`[${ts()}] [browserFetch] blocked will-navigate to: ${url}`);
-  });
-  win.webContents.on('will-redirect', (event, url) => {
-    if (isSameRegistrableDomain(initialUrl, url)) return;  // allow same-domain
-    event.preventDefault();
-    console.warn(`[${ts()}] [browserFetch] blocked will-redirect to: ${url}`);
-  });
-  ses.setPermissionRequestHandler(() => false);
-  ses.setPermissionCheckHandler(() => false);
+  // NOTE: we do NOT install per-window setWindowOpenHandler / will-navigate /
+  // will-redirect handlers here. The global handler in main/index.ts
+  // (app.on('web-contents-created', ...)) already covers ALL BrowserWindows,
+  // including hidden ones. It uses `contents.getURL()` (the window's current
+  // URL) as the reference for same-domain checks, which is exactly right for
+  // pooled windows — it allows WAF/Cloudflare reloads within the same domain
+  // while blocking cross-origin navigations.
 
-  // Install the ad/tracker blocker — blocks parasitic requests to
-  // amazon-adsystem.com, doubleclick.net, etc. at the network layer so they
-  // never leave the process.
-  const disposeAdBlocker = installAdBlocker(ses);
+  return win;
+}
+
+/** Destroy all pooled windows. Called from gracefulShutdown(). */
+export function destroyBrowserFetchPool(): void {
+  let destroyed = 0;
+  for (const win of idleWindows.values()) {
+    if (!win.isDestroyed()) {
+      try {
+        win.destroy();
+      } catch {
+        /* ignore */
+      }
+      destroyed++;
+    }
+  }
+  idleWindows.clear();
+  if (destroyed > 0) {
+    log.browserFetch.info(
+      `[browserFetch] pool: destroyed ${destroyed} pooled window(s) on shutdown`,
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// browserFetch — public API
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Fetch a URL via a hidden BrowserWindow. Returns the full page HTML.
+ *  Wrapped in `withNetworkTracking` so the renderer's refresh-icon spinner
+ *  knows when network activity is in flight. */
+export async function browserFetch(
+  url: string,
+  _opts: { headers?: Record<string, string>; referer?: string } = {},
+): Promise<string> {
+  // ── Replay mode: return recorded HTML, no BrowserWindow needed ──
+  if (isReplaying) {
+    const recorded = getReplayResponse('GET', url);
+    if (recorded) {
+      return recorded.body;
+    }
+    // Fall through to real fetch if not in fixture
+  }
+
+  const result = withNetworkTracking(() => browserFetchImpl(url, _opts));
+
+  // ── Record mode: save the HTML response ──
+  if (isRecording) {
+    const html = await result;
+    recordResponse('GET', url, 200, html);
+    return html;
+  }
+
+  return result;
+}
+
+async function browserFetchImpl(
+  url: string,
+  _opts: { headers?: Record<string, string>; referer?: string } = {},
+): Promise<string> {
+  // Use a persistent partition per-domain so Cloudflare cookies persist
+  // between requests to the same site (Cloudflare sets a cf_clearance
+  // cookie that lasts ~30 min — reusing it means subsequent requests
+  // skip the challenge entirely).
+  const domain = extractDomain(url);
+  const partition = `browserfetch-${domain}`;
+
+  const win = acquireWindow(domain, partition);
+  let crashed = false;
 
   try {
-    if (DEBUG) console.log(`[${ts()}] [browserFetch] → loading ${url}`);
+    if (DEBUG) log.browserFetch.info(`[${ts()}] [browserFetch] → loading ${url}`);
 
     // Load the URL. Don't set a custom UA — use Chromium's default UA
     // which looks like a real browser.
@@ -224,58 +340,64 @@ async function browserFetchImpl(
 
     // After loadURL resolves, we might be on the Cloudflare challenge page.
     // Wait for it to auto-resolve (JS runs, cookie is set, redirect happens).
-    // We poll the URL — once it stops containing "challenge" or "just a moment",
-    // we're on the real page.
     const startTime = Date.now();
     while (Date.now() - startTime < NAVIGATION_TIMEOUT_MS) {
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, 1000));
 
-      // Check the current page content
-      const currentHtml = await win.webContents.executeJavaScript(
-        'document.documentElement.outerHTML'
-      ).catch(() => '');
+      const currentHtml = await win.webContents
+        .executeJavaScript('document.documentElement.outerHTML')
+        .catch(() => '');
 
       // If the page no longer looks like a challenge, we're good.
-      if (currentHtml.length > 5000 &&
-          !currentHtml.includes('Just a moment...') &&
-          !currentHtml.includes('cf-challenge') &&
-          !currentHtml.includes('challenge-platform')) {
-        if (DEBUG) console.log(`[${ts()}] [browserFetch] ← page settled (${currentHtml.length} bytes) after ${Date.now() - startTime}ms`);
+      if (
+        currentHtml.length > 5000 &&
+        !currentHtml.includes('Just a moment...') &&
+        !currentHtml.includes('cf-challenge') &&
+        !currentHtml.includes('challenge-platform')
+      ) {
+        if (DEBUG)
+          log.browserFetch.info(
+            `[${ts()}] [browserFetch] ← page settled (${currentHtml.length} bytes) after ${Date.now() - startTime}ms`,
+          );
         return currentHtml;
       }
 
       if (DEBUG && Date.now() - startTime < 6000) {
-        console.log(`[${ts()}] [browserFetch] ⏳ waiting for Cloudflare... (${currentHtml.length} bytes)`);
+        log.browserFetch.info(
+          `[${ts()}] [browserFetch] ⏳ waiting for Cloudflare... (${currentHtml.length} bytes)`,
+        );
       }
     }
 
     // Timeout — extract whatever we have.
-    const html = await win.webContents.executeJavaScript(
-      'document.documentElement.outerHTML'
-    ).catch(() => '');
+    const html = await win.webContents
+      .executeJavaScript('document.documentElement.outerHTML')
+      .catch(() => '');
 
-    if (DEBUG) console.warn(`[${ts()}] [browserFetch] ⏱ timeout after ${NAVIGATION_TIMEOUT_MS}ms — got ${html.length} bytes`);
+    if (DEBUG)
+      log.browserFetch.warn(
+        `[${ts()}] [browserFetch] ⏱ timeout after ${NAVIGATION_TIMEOUT_MS}ms — got ${html.length} bytes`,
+      );
 
     if (html && html.length > 5000) {
-      return html;   // might still be usable
+      return html; // might still be usable
     }
 
-    throw new Error(`Cloudflare challenge not resolved within ${NAVIGATION_TIMEOUT_MS}ms (got ${html?.length ?? 0} bytes)`);
+    throw new Error(
+      `Cloudflare challenge not resolved within ${NAVIGATION_TIMEOUT_MS}ms (got ${html?.length ?? 0} bytes)`,
+    );
   } catch (err) {
-    if (DEBUG) console.warn(`[${ts()}] [browserFetch] ✗ error on ${url}:`, err);
+    crashed = true;
+    if (DEBUG)
+      log.browserFetch.warn(
+        `[${ts()}] [browserFetch] ✗ error on ${url}:` +
+          ' ' +
+          (err instanceof Error ? err.message : String(err)),
+      );
     throw err;
   } finally {
-    disposeAdBlocker();
-    // Destroy the window but DON'T clear the session — Cloudflare's
-    // cf_clearance cookie is stored in the partition and will be reused
-    // on the next request to the same domain.
-    win.destroy();
+    releaseWindow(domain, win, crashed);
   }
-}
-
-function extractDomain(url: string): string {
-  try { return new URL(url).hostname; }
-  catch { return 'default'; }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -300,10 +422,6 @@ function extractDomain(url: string): string {
 //   - The page's origin (https://www.imdb.com → same-site to api.graphql.imdb.com)
 //   - The browser's TLS fingerprint (real Chromium)
 //   - The browser's default headers (sec-fetch-*, User-Agent, etc.)
-//
-// This is the ONLY way to reach api.graphql.imdb.com anonymously — short
-// of running a full headless browser per request, which we're already
-// doing here anyway.
 //
 // Cost: one hidden BrowserWindow open for the duration of the fetch
 // (typically 200-500ms after the WAF is cleared on first call; the WAF
@@ -345,9 +463,7 @@ export async function browserGraphqlFetch(
   originPage: string,
   requestBody?: object,
 ): Promise<string> {
-  return withNetworkTracking(() =>
-    browserGraphqlFetchImpl(graphqlUrl, originPage, requestBody),
-  );
+  return withNetworkTracking(() => browserGraphqlFetchImpl(graphqlUrl, originPage, requestBody));
 }
 
 async function browserGraphqlFetchImpl(
@@ -355,50 +471,15 @@ async function browserGraphqlFetchImpl(
   originPage: string,
   requestBody?: object,
 ): Promise<string> {
-  const initialUrl = originPage;
   const domain = extractDomain(originPage);
   const partition = `browserfetch-${domain}`;
-  const ses = session.fromPartition(partition);
 
-  const win = new BrowserWindow({
-    show: false,
-    width: 1280,
-    height: 800,
-    webPreferences: {
-      session: ses,
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-      images: false,    // skip images — we only need JS to run for WAF
-      javascript: true,
-    },
-  });
-
-  // Same hardening as browserFetch.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    console.warn(`[${ts()}] [browserGraphqlFetch] blocked window-open to: ${url}`);
-    return { action: 'deny' };
-  });
-  // Allow same-domain navigations (WAF challenge.js calls
-  // window.location.reload() to apply the cookie — must not be blocked).
-  win.webContents.on('will-navigate', (event, url) => {
-    if (isSameRegistrableDomain(initialUrl, url)) return;
-    event.preventDefault();
-    console.warn(`[${ts()}] [browserGraphqlFetch] blocked will-navigate to: ${url}`);
-  });
-  win.webContents.on('will-redirect', (event, url) => {
-    if (isSameRegistrableDomain(initialUrl, url)) return;
-    event.preventDefault();
-    console.warn(`[${ts()}] [browserGraphqlFetch] blocked will-redirect to: ${url}`);
-  });
-  ses.setPermissionRequestHandler(() => false);
-  ses.setPermissionCheckHandler(() => false);
-
-  // Block tracker/ad requests at the network layer.
-  const disposeAdBlocker = installAdBlocker(ses);
+  const win = acquireWindow(domain, partition);
+  let crashed = false;
 
   try {
-    if (DEBUG) console.log(`[${ts()}] [browserGraphqlFetch] → loading origin page: ${originPage}`);
+    if (DEBUG)
+      log.browserFetch.info(`[${ts()}] [browserGraphqlFetch] → loading origin page: ${originPage}`);
     await win.loadURL(originPage);
 
     // Wait for the WAF challenge (if any) to resolve. The page's challenge.js
@@ -406,39 +487,33 @@ async function browserGraphqlFetchImpl(
     // checking that the page content is no longer the challenge HTML.
     const startTime = Date.now();
     while (Date.now() - startTime < NAVIGATION_TIMEOUT_MS) {
-      const currentHtml = await win.webContents.executeJavaScript(
-        'document.documentElement.outerHTML'
-      ).catch(() => '');
+      const currentHtml = await win.webContents
+        .executeJavaScript('document.documentElement.outerHTML')
+        .catch(() => '');
 
-      // Challenge HTML is small and contains these markers. Once they're
-      // gone and the page is reasonably sized, we're through.
-      if (currentHtml.length > 5000 &&
-          !currentHtml.includes('awsWafCookie') &&
-          !currentHtml.includes('challenge-container') &&
-          !currentHtml.includes('Just a moment...')) {
-        if (DEBUG) console.log(`[${ts()}] [browserGraphqlFetch] ← WAF cleared after ${Date.now() - startTime}ms (${currentHtml.length} bytes)`);
+      if (
+        currentHtml.length > 5000 &&
+        !currentHtml.includes('awsWafCookie') &&
+        !currentHtml.includes('challenge-container') &&
+        !currentHtml.includes('Just a moment...')
+      ) {
+        if (DEBUG)
+          log.browserFetch.info(
+            `[${ts()}] [browserGraphqlFetch] ← WAF cleared after ${Date.now() - startTime}ms (${currentHtml.length} bytes)`,
+          );
         break;
       }
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 500));
     }
 
     // Now execute the GraphQL fetch from inside the page's context.
-    // The fetch inherits all cookies (including aws-waf-token), the page's
-    // origin, and the browser's TLS/UA fingerprint.
-    //
-    // Method depends on whether a body was provided:
-    //   - With body: POST with `Content-Type: application/json` (for
-    //     `api.graphql.imdb.com` — rejects GET with 415).
-    //   - Without body: GET with no Content-Type (for
-    //     `caching.graphql.imdb.com` — CDN-cached, anonymous-safe, allows
-    //     GET with persisted query params in URL).
     const isPost = requestBody !== undefined;
     const bodyJson = isPost ? JSON.stringify(requestBody) : '';
 
     if (DEBUG) {
-      console.log(
+      log.browserGraphqlFetch.info(
         `[browserGraphqlFetch] → ${isPost ? 'POST' : 'GET'} to ${graphqlUrl}` +
-        (isPost ? ` (${bodyJson.length} bytes body)` : ''),
+          (isPost ? ` (${bodyJson.length} bytes body)` : ''),
       );
     }
 
@@ -470,17 +545,7 @@ async function browserGraphqlFetchImpl(
               credentials: 'include',
               headers: {
                 'Accept': 'application/graphql+json, application/json',
-                // IMDB's backend REQUIRES 'Content-Type: application/json' on
-                // ALL requests, even GETs with no body. Without it, the
-                // response is HTTP 415 "Invalid content type, must be
-                // application/json". Confirmed via the browser's CORS
-                // preflight (access-control-request-headers includes
-                // 'content-type' for GET requests).
                 'Content-Type': 'application/json',
-                // Required client-identification headers — the browser
-                // sends all of these on every imdb.com GraphQL request
-                // (captured from CORS preflight). Without 'x-imdb-client-name'
-                // the WAF rejects as "unknown client".
                 'x-imdb-client-name': 'imdb-web-next',
                 'x-imdb-user-language': 'fr-FR',
                 'x-imdb-user-country': 'FR',
@@ -505,16 +570,26 @@ async function browserGraphqlFetchImpl(
     }
 
     if (!result.ok) {
-      throw new Error(`browserGraphqlFetch: HTTP ${result.status} — ${result.body?.substring(0, 200) ?? ''}`);
+      throw new Error(
+        `browserGraphqlFetch: HTTP ${result.status} — ${result.body?.substring(0, 200) ?? ''}`,
+      );
     }
 
-    if (DEBUG) console.log(`[${ts()}] [browserGraphqlFetch] ← HTTP ${result.status} (${result.body?.length ?? 0} bytes)`);
+    if (DEBUG)
+      log.browserFetch.info(
+        `[${ts()}] [browserGraphqlFetch] ← HTTP ${result.status} (${result.body?.length ?? 0} bytes)`,
+      );
     return result.body ?? '';
   } catch (err) {
-    if (DEBUG) console.warn(`[${ts()}] [browserGraphqlFetch] ✗ error:`, err);
+    crashed = true;
+    if (DEBUG)
+      log.browserFetch.warn(
+        `[${ts()}] [browserGraphqlFetch] ✗ error:` +
+          ' ' +
+          (err instanceof Error ? err.message : String(err)),
+      );
     throw err;
   } finally {
-    disposeAdBlocker();
-    win.destroy();
+    releaseWindow(domain, win, crashed);
   }
 }

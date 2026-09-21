@@ -1,4 +1,5 @@
 import React from 'react';
+import { t } from '../../shared/i18n';
 
 interface Props {
   min: number;
@@ -20,10 +21,15 @@ interface Props {
  * range, raise it above the max thumb so it stays grabbable — otherwise the
  * max thumb would cover it.
  */
-const MIN_THUMB_RAISE_THRESHOLD = 0.1;   // 10% of the range
+const MIN_THUMB_RAISE_THRESHOLD = 0.1; // 10% of the range
 
 export const DoubleRangeSlider: React.FC<Props> = ({
-  min, max, step = 1, valueMin, valueMax, onChange,
+  min,
+  max,
+  step = 1,
+  valueMin,
+  valueMax,
+  onChange,
 }) => {
   const range = max - min;
   const minPct = ((valueMin - min) / range) * 100;
@@ -36,18 +42,31 @@ export const DoubleRangeSlider: React.FC<Props> = ({
   return (
     <div style={{ position: 'relative', height: 28, width: 220, flex: '0 0 auto' }}>
       {/* Track */}
-      <div style={{
-        position: 'absolute', top: '50%', left: 0, right: 0,
-        height: 4, background: 'var(--bg-slider)', borderRadius: 2,
-        transform: 'translateY(-50%)',
-      }} />
+      <div
+        style={{
+          position: 'absolute',
+          top: '50%',
+          left: 0,
+          right: 0,
+          height: 4,
+          background: 'var(--bg-slider)',
+          borderRadius: 2,
+          transform: 'translateY(-50%)',
+        }}
+      />
       {/* Selected range */}
-      <div style={{
-        position: 'absolute', top: '50%',
-        left: `${minPct}%`, width: `${maxPct - minPct}%`,
-        height: 4, background: 'var(--text-primary)', borderRadius: 2,
-        transform: 'translateY(-50%)',
-      }} />
+      <div
+        style={{
+          position: 'absolute',
+          top: '50%',
+          left: `${minPct}%`,
+          width: `${maxPct - minPct}%`,
+          height: 4,
+          background: 'var(--text-primary)',
+          borderRadius: 2,
+          transform: 'translateY(-50%)',
+        }}
+      />
 
       <input
         type="range"
@@ -59,7 +78,7 @@ export const DoubleRangeSlider: React.FC<Props> = ({
           const v = Math.min(Number(e.target.value), valueMax - step);
           onChange(v, valueMax);
         }}
-        aria-label="Heure minimum"
+        aria-label={t('minHour')}
         className="double-range-input"
         style={{ zIndex: minThumbZ }}
       />
@@ -73,7 +92,7 @@ export const DoubleRangeSlider: React.FC<Props> = ({
           const v = Math.max(Number(e.target.value), valueMin + step);
           onChange(valueMin, v);
         }}
-        aria-label="Heure maximum"
+        aria-label={t('maxHour')}
         className="double-range-input"
         style={{ zIndex: 4 }}
       />

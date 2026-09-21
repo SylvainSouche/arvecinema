@@ -2,6 +2,7 @@ import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import type DatabaseType from 'better-sqlite3';
+import { log } from './moduleLoggers';
 type Database = DatabaseType.Database;
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -29,7 +30,7 @@ let DatabaseCtor: typeof DatabaseType | null = null;
 try {
   DatabaseCtor = require('better-sqlite3');
 } catch (err) {
-  console.warn(
+  log.cacheDb.warn(
     `[cache-db] better-sqlite3 failed to load — caching will be unavailable. ` +
     `Run \`npm install\` then \`npm run postinstall\` to rebuild native modules. ` +
     `Error: ${err instanceof Error ? err.message : String(err)}`,
@@ -174,7 +175,7 @@ function createAllTablesV1(): void {
 /** Drop all tables (nuclear option — used on incompatible downgrade). */
 function dropAllTables(): void {
   if (!db) return;
-  console.warn(`[${ts()}] [cache-db] incompatible schema version — dropping all tables and rebuilding from scratch`);
+  log.cacheDb.warn(`[${ts()}] [cache-db] incompatible schema version — dropping all tables and rebuilding from scratch`);
   db.exec(`
     DROP TABLE IF EXISTS ids_cache;
     DROP TABLE IF EXISTS ratings_cache;
@@ -192,7 +193,7 @@ function runMigrations(): void {
 
   if (stored === 0) {
     // Fresh install — no meta table existed before openDb() created it.
-    console.log(`[${ts()}] [cache-db] fresh install — creating schema v${SCHEMA_VERSION}`);
+    log.cacheDb.info(`[${ts()}] [cache-db] fresh install — creating schema v${SCHEMA_VERSION}`);
     createAllTablesV1();
     return;
   }
@@ -205,7 +206,7 @@ function runMigrations(): void {
   if (stored > SCHEMA_VERSION) {
     // Incompatible: user downgraded the app, the DB has a newer schema
     // than this code knows how to handle. Nuclear option: drop and rebuild.
-    console.warn(
+    log.cacheDb.warn(
       `[cache-db] DB schema v${stored} > app schema v${SCHEMA_VERSION} ` +
       `(user downgraded?) — dropping all tables and rebuilding`,
     );
@@ -217,7 +218,7 @@ function runMigrations(): void {
   // stored < SCHEMA_VERSION → forward migration.
   // Run each migration function in sequence within a transaction.
   // If any migration throws, roll back and fall back to nuclear rebuild.
-  console.log(`[${ts()}] [cache-db] migrating schema v${stored} → v${SCHEMA_VERSION}`);
+  log.cacheDb.info(`[${ts()}] [cache-db] migrating schema v${stored} → v${SCHEMA_VERSION}`);
   try {
     db.transaction(() => {
       // ── Migration: v0 → v1 ──────────────────────────────────────────
@@ -226,7 +227,7 @@ function runMigrations(): void {
       // tables already exist (created by the old openDb), so we just
       // need to stamp the version.
       if (stored < 1) {
-        console.log(`[${ts()}] [cache-db] migration v0 → v1: stamping schema version`);
+        log.cacheDb.info(`[${ts()}] [cache-db] migration v0 → v1: stamping schema version`);
         // Tables already exist from the old code — just verify they're
         // present and stamp the version.
         const tables = db!.prepare(
@@ -245,15 +246,15 @@ function runMigrations(): void {
       // Example for when we bump to v2:
       //
       // if (stored < 2) {
-      //   console.log('[cache-db] migration v1 → v2: adding new_column to ratings_cache');
+      //   log.cacheDb.info('[cache-db] migration v1 → v2: adding new_column to ratings_cache');
       //   db.exec('ALTER TABLE ratings_cache ADD COLUMN new_column TEXT');
       //   setStoredSchemaVersion(2);
       // }
     })();
-    console.log(`[${ts()}] [cache-db] migration complete — now at v${SCHEMA_VERSION}`);
+    log.cacheDb.info(`[${ts()}] [cache-db] migration complete — now at v${SCHEMA_VERSION}`);
   } catch (err) {
     // Migration failed — nuclear rebuild.
-    console.error('[cache-db] migration failed, rebuilding from scratch:', err);
+    log.cacheDb.error('[cache-db] migration failed, rebuilding from scratch:' + " " + (err instanceof Error ? err.message : String(err)));
     dropAllTables();
     createAllTablesV1();
   }
@@ -556,9 +557,9 @@ export function migrateJsonCaches(): void {
       insertMany();
       // Archive the JSON file so we don't re-import on next launch.
       fs.renameSync(idsPath, `${idsPath}.archived`);
-      console.log(`[${ts()}] [cache-db] migrated ${Object.keys(json).length} IDs from JSON → SQLite`);
+      log.cacheDb.info(`[${ts()}] [cache-db] migrated ${Object.keys(json).length} IDs from JSON → SQLite`);
     } catch (err) {
-      console.warn(`[${ts()}] [cache-db] failed to migrate ids-cache.json:`, err);
+      log.cacheDb.warn(`[${ts()}] [cache-db] failed to migrate ids-cache.json:` + " " + (err instanceof Error ? err.message : String(err)));
     }
   }
 
@@ -601,9 +602,9 @@ export function migrateJsonCaches(): void {
       });
       insertMany();
       fs.renameSync(ratingsPath, `${ratingsPath}.archived`);
-      console.log(`[${ts()}] [cache-db] migrated ${Object.keys(json).length} ratings from JSON → SQLite`);
+      log.cacheDb.info(`[${ts()}] [cache-db] migrated ${Object.keys(json).length} ratings from JSON → SQLite`);
     } catch (err) {
-      console.warn(`[${ts()}] [cache-db] failed to migrate ratings-cache.json:`, err);
+      log.cacheDb.warn(`[${ts()}] [cache-db] failed to migrate ratings-cache.json:` + " " + (err instanceof Error ? err.message : String(err)));
     }
   }
 
@@ -630,7 +631,7 @@ export function migrateJsonCaches(): void {
           }
         }
         if (batch.length > 0) insertMany(batch);
-        console.log(`[${ts()}] [cache-db] migrated ${count.count} IMDB ratings from old imdb-ratings.db → SQLite`);
+        log.cacheDb.info(`[${ts()}] [cache-db] migrated ${count.count} IMDB ratings from old imdb-ratings.db → SQLite`);
       }
       oldDb.close();
       // Archive the old DB file.
@@ -642,7 +643,7 @@ export function migrateJsonCaches(): void {
         }
       } catch { /* ignore */ }
     } catch (err) {
-      console.warn(`[${ts()}] [cache-db] failed to migrate old imdb-ratings.db:`, err);
+      log.cacheDb.warn(`[${ts()}] [cache-db] failed to migrate old imdb-ratings.db:` + " " + (err instanceof Error ? err.message : String(err)));
     }
   }
 }
@@ -688,7 +689,7 @@ export function closeCacheDb(): void {
       db.pragma('wal_checkpoint(TRUNCATE)');
       db.close();
     } catch (err) {
-      console.warn('[cache-db] error during close:', err);
+      log.cacheDb.warn('[cache-db] error during close:' + " " + (err instanceof Error ? err.message : String(err)));
     }
     db = null;
   }

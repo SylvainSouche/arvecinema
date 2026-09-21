@@ -1,5 +1,6 @@
 import { fetchWithTimeout, REQUEST_TIMEOUT_MS } from './fetchWithTimeout';
 import { withNetworkTracking } from '../main/ratings/networkActivity';
+import { log } from '../main/ratings/moduleLoggers';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Connection pool with per-domain rate limiting + detailed logging.
@@ -13,15 +14,11 @@ import { withNetworkTracking } from '../main/ratings/networkActivity';
 // ──────────────────────────────────────────────────────────────────────────
 
 /** Format a timestamp for debug logs: HH:MM:ss.sss */
-function ts(): string {
-  const d = new Date();
-  return d.toLocaleTimeString('en-GB', { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
-}
 
 
 const DEBUG = process.env.ARVE_DEBUG === '1';
 
-function debug(...args: unknown[]) { if (DEBUG) console.log(`[${ts()}] [fetch]`, ...args); }
+function debug(...args: unknown[]) { if (DEBUG) log.connectionPool.info(args.join(" ")); }
 
 interface DomainState {
   lastRequestTime: number;

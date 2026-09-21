@@ -26,6 +26,7 @@ import { APP_USER_AGENT } from '../../shared/userAgent';
 import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import { log } from './moduleLoggers';
 
 // ──────────────────────────────────────────────────────────────────────────
 // IMDB scraper — uses a hidden BrowserWindow to bypass Cloudflare.
@@ -64,8 +65,10 @@ export async function fetchImdbRating(imdbId: string): Promise<ImdbResult | null
         fs.mkdirSync(debugDir, { recursive: true });
         const debugFile = path.join(debugDir, `imdb_${imdbId}.html`);
         fs.writeFileSync(debugFile, html, { encoding: 'utf-8' });
-        console.log(`[imdb] saved response to ${debugFile} (${html.length} bytes)`);
-      } catch { /* ignore */ }
+        log.imdbScraper.debug(`saved response to ${debugFile} (${html.length} bytes)`);
+      } catch {
+        /* ignore */
+      }
     }
 
     return parseImdbHtml(html, url);

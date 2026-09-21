@@ -31,27 +31,89 @@ cd arvecinema
 npm install
 ```
 
-## Run
+## Commands
+
+Run `npm run help` at any time for a quick reference. Full details below.
+
+### Development
 
 ```bash
-npm run dev          # dev mode (hot reload)
-npm run debug        # dev mode + DevTools + verbose logs (ARVE_DEBUG=1)
-npm run typecheck    # tsc --noEmit
-npm run build        # production build (electron-vite)
-npm run package:dir  # .app / unpacked folder
-npm run package:dmg  # macOS .dmg installer
-npm run package:zip  # macOS .zip (for notarization upload)
-npm run format       # prettier write
-npm run format:check # prettier check (CI)
+npm run dev          # dev mode (hot reload via Vite)
+npm run debug        # same + ARVE_DEBUG=1 (verbose logs, DevTools auto-open)
+npm run build        # production build to out/ (main + preload + renderer)
+npm run preview       # run the built app from out/ without rebuilding
+```
+
+### Code quality
+
+```bash
+npm run typecheck     # tsc --noEmit (type check without building)
+npm run format        # format all source files with Prettier
+npm run format:check  # verify formatting without writing (used in CI)
+```
+
+### Unit tests (vitest, ~1.9s, 212 tests)
+
+```bash
+npm run test          # run all unit tests once
+npm run test:watch    # re-run tests on file change
+npm run test:coverage # run tests + generate coverage report
+```
+
+Tests cover: date/time helpers, title normalization, SQLite cache CRUD,
+i18n fallback chain, VF/VO detection, plugin registry + auto-discovery,
+AlloCiné HTML parser (with real fixture).
+
+### E2E tests (Playwright + Electron, ~60s)
+
+```bash
+npm run test:e2e         # launch real Electron app, run 7 smoke tests
+npm run test:e2e:headed # same but show the app window (for debugging)
+```
+
+Tests cover: app launch, header rendering, cinema selector, filter bar,
+view toggle, about panel, diagnostics panel.
+
+On Linux, `scripts/run-e2e.sh` auto-starts Xvfb if no display is detected.
+On macOS/Windows, the native display is used.
+
+### Network record/replay
+
+```bash
+npm run record   # launch app, capture ALL HTTP traffic to
+                 # test/fixtures/network-capture.json
+                 # (close the app to save the fixture)
+
+npm run replay   # run E2E tests using the recorded fixture
+                 # (no network needed, fully deterministic)
+```
+
+The recorder intercepts **both** network paths:
+
+- `fetchWithTimeout` (Node.js fetch — Wikidata, boxofficeapi, RT)
+- `browserFetch` (hidden BrowserWindow — AlloCiné, cinevox, Cloudflare bypass)
+
+The fixture is a simple JSON map: `"GET:https://url" → {status, body}`.
+On replay, every fetch returns the recorded response — zero network calls,
+deterministic results, works offline.
+
+### Packaging
+
+```bash
+npm run package      # build + package for current platform (.dmg / .exe / AppImage)
+npm run package:dir  # build + unpacked directory (faster, for testing the packaged app)
+npm run package:dmg   # build + macOS .dmg only (arm64)
 ```
 
 ### Environment variables
 
-| Variable | Effect |
-|---|---|
-| `ARVE_DEBUG=1` | Verbose console logging (`[ratings]`, `[fetch]`, `[imdb-graphql]`, `[browserFetch]` prefixes) + saves raw HTML responses to `userData/debug/` |
-| `ARVE_NO_CACHE=1` | **Bypass both cache tiers** — `readIdsCache` / `readRatingsCache` return empty, writes are no-ops, `isFresh` always returns false. Every launch will hit Wikidata + IMDB GraphQL + AlloCiné + RT from scratch. Useful for testing the full pipeline. Existing cache files are NOT deleted — they're just ignored for the session. |
-| `ARVE_IMDB_GRAPHQL=1` | **Re-enable the IMDB GraphQL batch path** (disabled by default since 0.3.10). The only known batch persisted query hash (`WatchlistStateById`) requires an authenticated user — its query template includes the `predefinedList` field, which IMDB rejects for anonymous users. Useful for re-testing when a new persisted hash is discovered. |
+| Variable              | Effect                                                                          |
+| --------------------- | ------------------------------------------------------------------------------- |
+| `ARVE_DEBUG=1`        | Verbose console logging + saves raw HTML responses to `userData/debug/`         |
+| `ARVE_NO_CACHE=1`     | Bypass both cache tiers — every launch re-fetches from Wikidata + AlloCiné + RT |
+| `ARVE_IMDB_GRAPHQL=1` | Re-enable the IMDB GraphQL batch path (disabled by default)                     |
+| `ARVE_RECORD=path`    | Record all HTTP traffic to a JSON fixture file (used by `npm run record`)       |
+| `ARVE_REPLAY=path`    | Replay recorded HTTP responses from a JSON fixture (used by `npm run replay`)   |
 
 Combined example: `ARVE_DEBUG=1 ARVE_NO_CACHE=1 npm run dev`
 
@@ -126,6 +188,7 @@ Open `src/main/cinemas/registry.ts` and append:
 ```
 
 Two adapter factories are provided:
+
 - `createBoxOfficeApiAdapter` — for gatsby-source-boxofficeapi sites (JSON API)
 - `createCineChateauAdapter` / `createCineVoxAdapter` — for cotecine.fr sites (HTML scraping, ISO-8859-1 aware)
 
@@ -145,17 +208,18 @@ Each source completion fires a `rating:updated` IPC event so the score appears p
 Cloudflare-protected sites (AlloCiné) are scraped via a hidden Electron `BrowserWindow` that runs real Chromium JS. Cloudflare's `cf_clearance` cookie is persisted in a per-domain partition so subsequent requests skip the challenge.
 
 Storage in the user data dir:
+
 - **`cache.db`** — single SQLite file containing all caches (see below)
 - **In-flight dedup**: concurrent lookups for the same film share a single network request via `inflightIds` / `inflightRatings` Maps
 
 ### `cache.db` schema
 
-| Table | Keyed by | TTL | Purpose |
-|---|---|---|---|
-| `ids_cache` | `cache_key` (e.g. `allocine:55774` or `title:cars:2006`) | Permanent | Wikidata → IMDB/RT/AlloCiné ID resolution |
-| `ratings_cache` | `qid` | 24h | Scraped AlloCiné/RT scores per film |
-| `imdb_ratings` | `tconst` | 36h | IMDB dataset (1.71M rated titles), refreshed in background |
-| `meta` | `key` | — | Generic key/value (e.g. `imdb_dataset_last_update`) |
+| Table           | Keyed by                                                 | TTL       | Purpose                                                    |
+| --------------- | -------------------------------------------------------- | --------- | ---------------------------------------------------------- |
+| `ids_cache`     | `cache_key` (e.g. `allocine:55774` or `title:cars:2006`) | Permanent | Wikidata → IMDB/RT/AlloCiné ID resolution                  |
+| `ratings_cache` | `qid`                                                    | 24h       | Scraped AlloCiné/RT scores per film                        |
+| `imdb_ratings`  | `tconst`                                                 | 36h       | IMDB dataset (1.71M rated titles), refreshed in background |
+| `meta`          | `key`                                                    | —         | Generic key/value (e.g. `imdb_dataset_last_update`)        |
 
 Old JSON cache files (`ids-cache.json`, `ratings-cache.json`) and the old standalone `imdb-ratings.db` are auto-migrated to SQLite on first launch (see `cacheDb.migrateJsonCaches()`), then renamed to `.archived` so we don't re-import them.
 

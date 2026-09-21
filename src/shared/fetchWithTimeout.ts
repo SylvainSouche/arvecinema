@@ -1,6 +1,17 @@
 // ──────────────────────────────────────────────────────────────────────────
 // Network helpers — used by all cinema adapters.
+//
+// Supports record/replay via ARVE_RECORD / ARVE_REPLAY env vars.
+// See src/main/ratings/networkRecorder.ts for details.
 // ──────────────────────────────────────────────────────────────────────────
+
+import {
+  isReplaying,
+  isRecording,
+  getReplayResponse,
+  createMockResponse,
+  recordResponse,
+} from '../main/ratings/networkRecorder';
 
 /**
  * Wrap a `fetch()` call with AbortController-based timeouts covering BOTH
@@ -27,13 +38,37 @@ export async function fetchWithTimeout(
   init: RequestInit,
   timeoutMs: number = REQUEST_TIMEOUT_MS,
 ): Promise<Response> {
+  // ── Replay mode: return recorded response, no network call ──
+  if (isReplaying) {
+    const method = (init.method as string) ?? 'GET';
+    const recorded = getReplayResponse(method, url);
+    if (recorded) {
+      return createMockResponse(recorded);
+    }
+    // If no recorded response, fall through to real fetch (for URLs
+    // we didn't capture). This allows partial replays.
+  }
+
+  // ── Real fetch (with timeout) ──
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    // Headers must arrive within the timeout. The body is read by the caller
-    // via res.text() / res.arrayBuffer() — those reads will inherit the same
-    // AbortController signal, so they're also covered.
-    return await fetch(url, { ...init, signal: ctrl.signal });
+    const res = await fetch(url, { ...init, signal: ctrl.signal });
+
+    // ── Record mode: save the response body ──
+    if (isRecording && res.ok) {
+      const method = (init.method as string) ?? 'GET';
+      // Clone the response so we can read the body without consuming it
+      const clone = res.clone();
+      const body = await clone.text().catch(() => '');
+      const headers: Record<string, string> = {};
+      clone.headers.forEach((val, key) => {
+        headers[key] = val;
+      });
+      recordResponse(method, url, res.status, body, headers);
+    }
+
+    return res;
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
       throw new TimeoutError(`request timed out after ${timeoutMs}ms: ${url}`);
@@ -74,7 +109,10 @@ export async function readBodyWithTimeout(
         const readResult = await Promise.race([
           reader.read(),
           new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new TimeoutError(`body read timed out after ${timeoutMs}ms`)), remaining),
+            setTimeout(
+              () => reject(new TimeoutError(`body read timed out after ${timeoutMs}ms`)),
+              remaining,
+            ),
           ),
         ]);
         if (readResult.done) break;

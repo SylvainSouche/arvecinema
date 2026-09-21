@@ -1,5 +1,7 @@
 import { pooledFetch } from '../../shared/connectionPool';
 import { APP_USER_AGENT } from '../../shared/userAgent';
+import type { RatingSource, ResolvedIds, RatingFetchResult } from './RatingSource';
+import type { Movie } from '../../shared/types';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Rotten Tomatoes scraper — press Tomatometer only.
@@ -96,3 +98,34 @@ function extractCertifiedFresh(html: string): boolean {
     || html.includes('"certified":true')
     || html.includes('certified-fresh');
 }
+
+// ── RatingSource implementation ────────────────────────────────────────────
+
+/** Rotten Tomatoes rating source — implements the RatingSource interface.
+ *  Scrapes the Tomatometer from rottentomatoes.com via pooledFetch. */
+export const rottenTomatoesSource: RatingSource = {
+  id: 'rt',
+  displayName: 'Rotten Tomatoes',
+
+  isAvailable(ids: ResolvedIds, _movie: Movie): boolean {
+    return Boolean(ids.rtPath);
+  },
+
+  async fetchRating(ids: ResolvedIds, _movie: Movie): Promise<RatingFetchResult | null> {
+    if (!ids.rtPath) {
+      return {
+        status: 'absent',
+        statusMessage: 'Pas de path RT sur Wikidata',
+      };
+    }
+    const rt = await fetchRtRatings(ids.rtPath);
+    if (!rt) return null;
+    return {
+      rating: rt.tomatometer,
+      certifiedFresh: rt.certifiedFresh,
+      url: rt.url,
+      status: rt.status,
+      statusMessage: rt.statusMessage,
+    };
+  },
+};

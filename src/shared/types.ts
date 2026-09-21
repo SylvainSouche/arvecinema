@@ -129,8 +129,8 @@ export interface ScheduleResponse {
 export interface CinemaStatus {
   cinemaId: string;
   status: 'ok' | 'timeout' | 'http-error' | 'parse-error';
-  error?: string;   // human-readable message for the UI
-  fetchedAt?: string;   // ISO timestamp of the fetch attempt
+  error?: string; // human-readable message for the UI
+  fetchedAt?: string; // ISO timestamp of the fetch attempt
 }
 
 export type AudioFilter = 'ALL' | 'VF' | 'VO';
@@ -141,17 +141,12 @@ export type AudioFilter = 'ALL' | 'VF' | 'VO';
 // renderer (when filtering showtimes by audio version) use these helpers.
 // ──────────────────────────────────────────────────────────────────────────
 
-const VF_TAGS = new Set([
-  'Localization.Language.French',
-  'Showtime.Accessibility.Dubbed',
-]);
+const VF_TAGS = new Set(['Localization.Language.French', 'Showtime.Accessibility.Dubbed']);
 const VO_TAGS = new Set(['Localization.Version.Original']);
 
-export const isVFShowtime = (tags: string[]): boolean =>
-  tags.some(t => VF_TAGS.has(t));
+export const isVFShowtime = (tags: string[]): boolean => tags.some((t) => VF_TAGS.has(t));
 
-export const isVOShowtime = (tags: string[]): boolean =>
-  tags.some(t => VO_TAGS.has(t));
+export const isVOShowtime = (tags: string[]): boolean => tags.some((t) => VO_TAGS.has(t));
 
 /** Returns "VO" if the showtime is original version, "VF" if French, "" otherwise. */
 export const showtimeVersion = (tags: string[]): 'VF' | 'VO' | '' =>
@@ -183,19 +178,19 @@ declare global {
       openTicket: (url: string) => Promise<boolean>;
       /** Progressive ratings: listen for per-movie rating updates.
        *  Returns an unsubscribe function. */
-      onRatingUpdated: (callback: (data: {
-        cinemaId: string;
-        movieId: string;
-        ratings: Record<string, unknown>;
-      }) => void) => () => void;
+      onRatingUpdated: (
+        callback: (data: {
+          cinemaId: string;
+          movieId: string;
+          ratings: Record<string, unknown>;
+        }) => void,
+      ) => () => void;
       /** Enrichment progress: fires whenever a film finishes processing
        *  (either scraped or cache-hit). When `resolved === total`, the
        *  enrichment is complete. Returns an unsubscribe function. */
-      onRatingsProgress: (callback: (data: {
-        resolved: number;
-        total: number;
-        pct: number;
-      }) => void) => () => void;
+      onRatingsProgress: (
+        callback: (data: { resolved: number; total: number; pct: number }) => void,
+      ) => () => void;
       /** Network activity state: fires `true` when any network operation
        *  starts (browserFetch, pooledFetch, dataset download) and `false`
        *  when all in-flight operations complete. Used to animate the
@@ -205,6 +200,44 @@ declare global {
       probeTop250?: () => Promise<string>;
       /** DEV-ONLY: fetch ALL movies from ALL cinemas for export. */
       exportAll?: () => Promise<{ movies: Movie[]; cinemaStatuses: CinemaStatus[] }>;
+      /** Retry failed rating lookups. Pass the current movie list (with
+       *  their wikidataUrl + current rating statuses). Main process will
+       *  re-fetch only sources currently in 'blocked' status. Rating
+       *  updates flow back via `onRatingUpdated`. Returns a summary:
+       *  { retried, succeeded, stillFailing }. */
+      retryFailedLookups: (
+        movies: Array<{
+          cinemaId: string;
+          id: string;
+          title: string;
+          wikidataUrl?: string;
+          imdbStatus?: string;
+          allocineStatus?: string;
+          rtStatus?: string;
+        }>,
+      ) => Promise<{ retried: number; succeeded: number; stillFailing: number }>;
+      /** Get all captured log entries from the main process.
+       *  Each entry has { timestamp, level, component, message } where
+       *  level is 'debug' | 'info' | 'warn' | 'error'. */
+      getLogs: () => Promise<
+        Array<{
+          timestamp: string;
+          level: 'debug' | 'info' | 'warn' | 'error';
+          component: string;
+          message: string;
+        }>
+      >;
+      /** Clear the log buffer in the main process. */
+      clearLogs: () => Promise<boolean>;
+      /** Subscribe to real-time log entries. Returns unsubscribe function. */
+      onLogAppend: (
+        callback: (entry: {
+          timestamp: string;
+          level: 'debug' | 'info' | 'warn' | 'error';
+          component: string;
+          message: string;
+        }) => void,
+      ) => () => void;
     };
   }
 }

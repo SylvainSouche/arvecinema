@@ -26,6 +26,7 @@
 // ──────────────────────────────────────────────────────────────────────────
 
 import { browserGraphqlFetch } from './browserFetch';
+import { log } from './moduleLoggers';
 
 // ──────────────────────────────────────────────────────────────────────────
 // IMDB GraphQL batched ratings client.
@@ -66,8 +67,7 @@ import { browserGraphqlFetch } from './browserFetch';
 // ──────────────────────────────────────────────────────────────────────────
 
 const IMDB_GRAPHQL_URL = 'https://api.graphql.imdb.com/';
-const PERSISTED_QUERY_HASH =
-  '8573d31b2dda37d8daa0ad258982b67d44f2c7aed823f423eb03fd543a20cada';
+const PERSISTED_QUERY_HASH = '8573d31b2dda37d8daa0ad258982b67d44f2c7aed823f423eb03fd543a20cada';
 const PERSISTED_QUERY_VERSION = 1;
 
 /** Max IDs per request — IMDB's GraphQL endpoint accepts up to 50. */
@@ -158,19 +158,16 @@ export async function probeTop250(): Promise<string> {
   );
 
   if (DEBUG) {
-    console.log(`[imdb-graphql] probing Top250 via GET to caching.graphql.imdb.com`);
-    console.log(`[imdb-graphql]   URL: ${url.toString()}`);
+    log.imdbGraphql.debug(`probing Top250 via GET to caching.graphql.imdb.com`);
+    log.imdbGraphql.debug(`  URL: ${url.toString()}`);
   }
 
   // GET mode — no requestBody, just URL params
-  const responseBody = await browserGraphqlFetch(
-    url.toString(),
-    'https://www.imdb.com/',
-  );
+  const responseBody = await browserGraphqlFetch(url.toString(), 'https://www.imdb.com/');
 
   if (DEBUG) {
-    console.log(`[imdb-graphql] probe response (${responseBody.length} bytes):`);
-    console.log(responseBody.substring(0, 1000));
+    log.imdbGraphql.debug(`probe response (${responseBody.length} bytes):`);
+    log.imdbGraphql.debug(responseBody.substring(0, 1000));
   }
   return responseBody;
 }
@@ -178,14 +175,12 @@ export async function probeTop250(): Promise<string> {
 function recordFailure(reason: string): void {
   graphqlFailures++;
   if (DEBUG) {
-    console.warn(
-      `[imdb-graphql] failure ${graphqlFailures}/${MAX_FAILURES}: ${reason}`,
-    );
+    log.imdbGraphql.warn(`failure ${graphqlFailures}/${MAX_FAILURES}: ${reason}`);
   }
   if (graphqlFailures >= MAX_FAILURES && !graphqlDisabled) {
     graphqlDisabled = true;
-    console.warn(
-      `[imdb-graphql] disabled after ${graphqlFailures} failures — ` +
+    log.imdbGraphql.warn(
+      `disabled after ${graphqlFailures} failures — ` +
         `falling back to per-film browserFetch for the rest of this session.`,
     );
   }
@@ -267,9 +262,7 @@ export async function fetchImdbRatingsBatch(
   return results;
 }
 
-async function fetchSingleBatch(
-  batch: string[],
-): Promise<Map<string, ImdbBatchEntry>> {
+async function fetchSingleBatch(batch: string[]): Promise<Map<string, ImdbBatchEntry>> {
   const results = new Map<string, ImdbBatchEntry>();
 
   // Build the POST body. IMDB's GraphQL backend REQUIRES POST with
@@ -295,11 +288,9 @@ async function fetchSingleBatch(
   };
 
   if (DEBUG) {
-    console.log(
-      `[imdb-graphql] → POST batch of ${batch.length} (first: ${batch[0]})`,
-    );
-    console.log(`[imdb-graphql]   URL: ${IMDB_GRAPHQL_URL}`);
-    console.log(`[imdb-graphql]   body: ${JSON.stringify(requestBody)}`);
+    log.imdbGraphql.debug(`→ POST batch of ${batch.length} (first: ${batch[0]})`);
+    log.imdbGraphql.debug(`  URL: ${IMDB_GRAPHQL_URL}`);
+    log.imdbGraphql.debug(`  body: ${JSON.stringify(requestBody)}`);
   }
 
   const startTime = Date.now();
@@ -314,8 +305,8 @@ async function fetchSingleBatch(
   // The hidden window's session partition persists the WAF cookie, so
   // subsequent batches reuse it without re-solving the challenge.
   const responseBody = await browserGraphqlFetch(
-    IMDB_GRAPHQL_URL,           // bare URL — no query params, params go in body
-    'https://www.imdb.com/',    // any imdb.com page — we just need to clear WAF
+    IMDB_GRAPHQL_URL, // bare URL — no query params, params go in body
+    'https://www.imdb.com/', // any imdb.com page — we just need to clear WAF
     requestBody,
   );
   const elapsedMs = Date.now() - startTime;
@@ -326,9 +317,7 @@ async function fetchSingleBatch(
   try {
     data = JSON.parse(responseBody) as GraphqlResponse;
   } catch (err) {
-    throw new Error(
-      `JSON parse failed: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    throw new Error(`JSON parse failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // GraphQL endpoint can return 200 with an `errors` array.
@@ -339,9 +328,7 @@ async function fetchSingleBatch(
 
   const titles = data.data?.titles ?? [];
   if (DEBUG) {
-    console.log(
-      `[imdb-graphql] ← ${titles.length} results in ${elapsedMs}ms`,
-    );
+    log.imdbGraphql.debug(`← ${titles.length} results in ${elapsedMs}ms`);
   }
 
   // Build a fast lookup by ID (case-insensitive).
@@ -369,19 +356,11 @@ async function fetchSingleBatch(
     const rating = t.ratingsSummary?.aggregateRating ?? undefined;
     const votes = t.ratingsSummary?.voteCount ?? undefined;
 
-    if (
-      typeof rating === 'number' &&
-      Number.isFinite(rating) &&
-      rating >= 0 &&
-      rating <= 10
-    ) {
+    if (typeof rating === 'number' && Number.isFinite(rating) && rating >= 0 && rating <= 10) {
       results.set(imdbId, {
         imdbId,
         rating,
-        votes:
-          typeof votes === 'number' && Number.isFinite(votes)
-            ? votes
-            : undefined,
+        votes: typeof votes === 'number' && Number.isFinite(votes) ? votes : undefined,
         url,
         status: 'ok',
       });

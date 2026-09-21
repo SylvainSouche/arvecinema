@@ -3,6 +3,8 @@ import path from 'path';
 import fs from 'fs';
 import { createGunzip } from 'zlib';
 import { fetchWithTimeout } from '../../shared/fetchWithTimeout';
+import type { RatingSource, ResolvedIds, RatingFetchResult } from './RatingSource';
+import type { Movie } from '../../shared/types';
 import {
   initCacheDb,
   getMeta,
@@ -12,6 +14,7 @@ import {
   getImdbRatingsBatch as dbGetImdbRatingsBatch,
 } from './cacheDb';
 import { withNetworkTracking } from './networkActivity';
+import { log } from './moduleLoggers';
 
 // ──────────────────────────────────────────────────────────────────────────
 // IMDB dataset client — SQLite-backed ratings lookup via the shared cache DB.
@@ -46,14 +49,10 @@ const DOWNLOAD_TIMEOUT_MS = 120_000;            // 2 minutes for ~8 MB download
 const META_KEY_LAST_UPDATE = 'imdb_dataset_last_update';
 
 /** Format a timestamp for debug logs: HH:MM:ss.sss */
-function ts(): string {
-  const d = new Date();
-  return d.toLocaleTimeString('en-GB', { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
-}
 
 
 const DEBUG = process.env.ARVE_DEBUG === '1';
-function debug(...args: unknown[]) { if (DEBUG) console.log(`[${ts()}] [imdb-dataset]`, ...args); }
+function debug(...args: unknown[]) { if (DEBUG) log.imdbDataset.info(args.join(" ")); }
 
 interface RatingEntry {
   rating: number;
@@ -103,7 +102,7 @@ export function onDatasetRefreshed(cb: RefreshCallback): () => void {
 function notifyRefreshed(): void {
   for (const cb of refreshCallbacks) {
     try { cb(); } catch (err) {
-      console.warn('[imdb-dataset] refresh callback threw:', err);
+      log.imdbDataset.warn('[imdb-dataset] refresh callback threw:' + " " + (err instanceof Error ? err.message : String(err)));
     }
   }
 }
@@ -213,7 +212,7 @@ async function refreshDataset(): Promise<void> {
     });
     notifyRefreshed();
   } catch (err) {
-    console.warn(
+    log.imdbDataset.warn(
       `[imdb-dataset] refresh failed: ${err instanceof Error ? err.message : String(err)}`,
     );
   } finally {
@@ -245,7 +244,7 @@ export function initDataset(): void {
       } old — refreshing in background`,
     );
     refreshDataset().catch((err) => {
-      console.warn('[imdb-dataset] background refresh error:', err);
+      log.imdbDataset.warn('[imdb-dataset] background refresh error:' + " " + (err instanceof Error ? err.message : String(err)));
     });
   }
 }
@@ -260,3 +259,40 @@ export function getRatingsByTconst(tconsts: string[]): Map<string, RatingEntry> 
 export async function refreshDatasetNow(): Promise<void> {
   await refreshDataset();
 }
+
+// ── RatingSource implementation ────────────────────────────────────────────
+
+/** IMDB dataset rating source — implements the RatingSource interface.
+ *  Looks up ratings from the local SQLite imdb_ratings table (populated
+ *  from the official IMDB dataset, refreshed every 36h). */
+export const imdbDatasetSource: RatingSource = {
+  id: 'imdb',
+  displayName: 'IMDb',
+
+  isAvailable(ids: ResolvedIds, _movie: Movie): boolean {
+    return Boolean(ids.imdbId);
+  },
+
+  async fetchRating(ids: ResolvedIds, _movie: Movie): Promise<RatingFetchResult | null> {
+    if (!ids.imdbId) {
+      return {
+        status: 'absent',
+        statusMessage: "Pas d'ID IMDB",
+      };
+    }
+    const entry = getRatingsByTconst([ids.imdbId]).get(ids.imdbId);
+    if (!entry) {
+      return {
+        status: 'absent',
+        statusMessage: 'Not in IMDB dataset (released within last 24h?)',
+        url: `https://www.imdb.com/title/${ids.imdbId}/`,
+      };
+    }
+    return {
+      rating: entry.rating,
+      votes: entry.votes,
+      url: `https://www.imdb.com/title/${ids.imdbId}/`,
+      status: 'ok',
+    };
+  },
+};

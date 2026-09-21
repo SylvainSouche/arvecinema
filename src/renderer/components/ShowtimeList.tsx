@@ -47,7 +47,7 @@ export const ShowtimeList: React.FC<Props> = ({ showtimes, cinemas }) => {
               cursor: st.ticketingUrl ? 'pointer' : 'default',
             }}
             title={[
-              st.screen ? `Salle : ${st.screen}` : null,
+              st.screen ? `${t('screen')}: ${st.screen}` : null,
               cinemaName(cinemas, st.cinemaId),
             ].filter(Boolean).join(' · ')}
           >

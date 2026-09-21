@@ -1,8 +1,12 @@
 import { browserFetch } from './browserFetch';
+import { pooledFetch } from '../../shared/connectionPool';
 import { APP_USER_AGENT } from '../../shared/userAgent';
 import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import type { RatingSource, ResolvedIds, RatingFetchResult } from './RatingSource';
+import type { Movie } from '../../shared/types';
+import { log } from './moduleLoggers';
 
 // ──────────────────────────────────────────────────────────────────────────
 // AlloCiné scraper — French press + audience ratings.
@@ -41,14 +45,27 @@ export async function fetchAllocineRatings(cfilmId: string): Promise<AllocineRes
   const url = `${ALLOCINE_BASE}/film/fichefilm_gen_cfilm=${cfilmId}.html`;
 
   try {
-    const html = await browserFetch(url, { headers: HEADERS });
+    // Try pooledFetch first — returns the raw server HTML (small, ~50-100 KB).
+    // The ratings (rating-mdl CSS classes, stareval-note text) are server-side
+    // rendered, so they're in the initial HTML — no JavaScript needed.
+    let html = await pooledFetch(url, { headers: HEADERS });
 
-    if (html.includes('Just a moment...') || html.includes('cf-challenge')) {
-      return {
-        url,
-        status: 'blocked',
-        statusMessage: 'Cloudflare a bloqué la requête',
-      };
+    // If Cloudflare blocked the request, fall back to browserFetch
+    // (hidden BrowserWindow solves the challenge automatically).
+    if (html.includes('Just a moment...') || html.includes('cf-challenge') || html.length < 200) {
+      if (DEBUG)
+        log.allocine.info(
+          `[allocine] Cloudflare detected on ${cfilmId} — falling back to browserFetch`,
+        );
+      html = await browserFetch(url, { headers: HEADERS });
+
+      if (html.includes('Just a moment...') || html.includes('cf-challenge')) {
+        return {
+          url,
+          status: 'blocked',
+          statusMessage: 'Cloudflare a bloqué la requête',
+        };
+      }
     }
 
     // In debug mode, save the raw response for inspection.
@@ -58,8 +75,10 @@ export async function fetchAllocineRatings(cfilmId: string): Promise<AllocineRes
         fs.mkdirSync(debugDir, { recursive: true });
         const debugFile = path.join(debugDir, `allocine_${cfilmId}.html`);
         fs.writeFileSync(debugFile, html, { encoding: 'utf-8' });
-        console.log(`[allocine] saved response to ${debugFile} (${html.length} bytes)`);
-      } catch { /* ignore */ }
+        log.allocine.info(`[allocine] saved response to ${debugFile} (${html.length} bytes)`);
+      } catch {
+        /* ignore */
+      }
     }
 
     const pressRating = extractRatingBySection(html, 'Presse');
@@ -94,10 +113,15 @@ export async function searchAllocineByTitle(title: string): Promise<string | nul
   const url = `${ALLOCINE_BASE}/recherche/?q=${encodeURIComponent(title)}`;
 
   try {
-    const html = await browserFetch(url, { headers: HEADERS });
+    // Try pooledFetch first (fast, small), fall back to browserFetch if Cloudflare
+    let html = await pooledFetch(url, { headers: HEADERS });
+
+    if (html.includes('Just a moment...') || html.includes('cf-challenge') || html.length < 200) {
+      html = await browserFetch(url, { headers: HEADERS });
+    }
 
     if (html.includes('Just a moment...') || html.includes('cf-challenge')) {
-      console.warn('[allocine] Cloudflare challenge on search');
+      log.allocine.warn('[allocine] Cloudflare challenge on search');
       return null;
     }
 
@@ -118,7 +142,7 @@ export async function searchAllocineByTitle(title: string): Promise<string | nul
  *   2. JSON-LD ratingValue → "3.6" (internal precise value)
  *   3. rating-mdl nXX CSS class → n40 = 4.0 (stars display, rounded to 0.5)
  */
-function extractRatingBySection(html: string, sectionLabel: string): number | undefined {
+export function extractRatingBySection(html: string, sectionLabel: string): number | undefined {
   const labelIdx = html.indexOf(sectionLabel);
   if (labelIdx < 0) return undefined;
 
@@ -159,7 +183,7 @@ function extractRatingBySection(html: string, sectionLabel: string): number | un
 }
 
 /** Extract the audience vote count from "NN Critiques Spectateurs". */
-function extractVoteCount(html: string): number | undefined {
+export function extractVoteCount(html: string): number | undefined {
   const m = html.match(/(\d+)\s+Critiques?\s+Spectateurs/);
   if (m) {
     const n = Number(m[1]);
@@ -177,3 +201,41 @@ function extractVoteCount(html: string): number | undefined {
 function parseFrenchNumber(s: string): number {
   return Number(s.replace(',', '.'));
 }
+
+// ── RatingSource implementation ────────────────────────────────────────────
+
+/** AlloCiné rating source — implements the RatingSource interface.
+ *  Scrapes press + audience ratings from allocine.fr via browserFetch. */
+export const allocineSource: RatingSource = {
+  id: 'allocine',
+  displayName: 'AlloCiné',
+
+  isAvailable(ids: ResolvedIds, _movie: Movie): boolean {
+    // AlloCiné needs either an allocineId or a title to search for.
+    return Boolean(ids.allocineId || _movie.title);
+  },
+
+  async fetchRating(ids: ResolvedIds, movie: Movie): Promise<RatingFetchResult | null> {
+    let acId = ids.allocineId;
+    if (!acId) {
+      acId = (await searchAllocineByTitle(movie.title)) ?? undefined;
+    }
+    if (!acId) {
+      return {
+        status: 'absent',
+        statusMessage: "Pas d'ID AlloCiné trouvé",
+      };
+    }
+    const ac = await fetchAllocineRatings(acId);
+    if (!ac) return null;
+    return {
+      rating: ac.pressRating,
+      secondaryRating: ac.audienceRating,
+      secondaryVotes: ac.audienceVotes,
+      votes: ac.audienceVotes,
+      url: ac.url,
+      status: ac.status,
+      statusMessage: ac.statusMessage,
+    };
+  },
+};

@@ -1,0 +1,96 @@
+# ──────────────────────────────────────────────────────────────────────────
+# CI — runs on every PR and push to main.
+#
+# Jobs:
+#   1. lint-and-test — typecheck + vitest unit tests + smoke tests
+#   2. build          — electron-vite build (verifies the app compiles)
+#
+# The build job runs on Linux only (fastest + cheapest). macOS/Linux
+# packaging is tested locally before releases; CI focuses on catching
+# regressions in the shared code.
+# ──────────────────────────────────────────────────────────────────────────
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs for the same branch when a new commit is pushed.
+# Saves CI minutes when force-pushing during development.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    name: Typecheck + Unit Tests + Smoke Tests
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        # --no-audit --no-fund: skip optional npm network calls for speed
+        # We DON'T use npm ci because postinstall runs electron-builder
+        # install-app-deps which rebuilds native modules for Electron —
+        # that's needed for the build job, not for tests. For tests we
+        # need better-sqlite3 rebuilt for the system Node, which happens
+        # via `npm rebuild better-sqlite3` below.
+        run: npm install --no-audit --no-fund
+
+      - name: Rebuild native modules for system Node
+        # better-sqlite3 ships prebuilt for Electron's Node ABI, but vitest
+        # runs on the system Node. Rebuild to match.
+        run: npm rebuild better-sqlite3
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Run i18n smoke test
+        run: node scripts/smoke-test-i18n.mjs
+
+      - name: Run logger smoke test
+        run: node scripts/smoke-test-logger.mjs
+
+  build:
+    name: Build (electron-vite)
+    runs-on: ubuntu-22.04
+    needs: lint-and-test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Rebuild native modules for Electron
+        # The build needs better-sqlite3 compiled for Electron's Node ABI
+        # (not the system Node). electron-builder's postinstall handles this
+        # automatically, but we run it explicitly to be safe.
+        run: npx electron-builder install-app-deps
+
+      - name: Build
+        run: npm run build
+        env:
+          # electron-vite needs to know we're not in a dev environment
+          NODE_ENV: production
