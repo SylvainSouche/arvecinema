@@ -6,13 +6,14 @@ Built with Electron 33 + React 18 + TypeScript + electron-vite. BSD-3-Clause lic
 
 ## Features
 
-- **4 cinemas** via a modular adapter registry — add/remove a cinema in one line
+- **4 cinemas** via a drop-in plugin system — add a cinema by dropping a `.ts` file, no code edits needed
 - **Day view**: one card per film (deduplicated across cinemas), sorted by next screening / title / cinema
 - **Week view**: swimlane grid with showtime chips positioned by real start/end time, middle-click drag to pan
 - **Filters**: cinema multi-select, day picker, audio version (VF/VO), hour range (quarter-hour slider), title/director/actor search
 - **Ratings**: progressive enrichment via Wikidata → AlloCiné (press + audience) + IMDB + Rotten Tomatoes (tomatometer)
+- **Diagnostics panel**: per-cinema health, per-source counts, blocked films, "Copy diagnostics" for bug reports
 - **Dark / light theme**, French / English UI
-- **Offline cache**: Wikidata IDs cached permanently, ratings cached 24h
+- **Offline cache**: Wikidata IDs cached permanently (unless incomplete), ratings cached 24h
 
 ## Prerequisites
 
@@ -20,7 +21,7 @@ Built with Electron 33 + React 18 + TypeScript + electron-vite. BSD-3-Clause lic
 - **npm** ≥ 9 (or compatible pnpm/yarn)
 - **Git** (to clone the repo)
 - **Network access** on first launch (Wikidata + AlloCiné/IMDB/RT are fetched lazily, then cached)
-- **Linux only**: `libnss3`, `libatk1.0-0`, `libatk-bridge2.0-0`, `libgbm1`, `libgtk-3-0` (Electron runtime deps; the hidden `BrowserWindow` used for Cloudflare bypass needs these too)
+- **Linux only**: `libnss3`, `libatk1.0-0`, `libatk-bridge2.0-0`, `libgbm1`, `libgtk-3-0` (Electron runtime deps)
 - **macOS only (packaging)**: Xcode Command Line Tools + a Developer ID certificate if you want to notarize the `.dmg` (not required for personal use)
 
 ## Install
@@ -52,7 +53,7 @@ npm run format        # format all source files with Prettier
 npm run format:check  # verify formatting without writing (used in CI)
 ```
 
-### Unit tests (vitest, ~1.9s, 212 tests)
+### Unit tests (vitest, ~2s, 262 tests)
 
 ```bash
 npm run test          # run all unit tests once
@@ -60,9 +61,9 @@ npm run test:watch    # re-run tests on file change
 npm run test:coverage # run tests + generate coverage report
 ```
 
-Tests cover: date/time helpers, title normalization, SQLite cache CRUD,
-i18n fallback chain, VF/VO detection, plugin registry + auto-discovery,
-AlloCiné HTML parser (with real fixture).
+Tests cover: date/time helpers, title normalization, title cleaning rules
+(FR + EN patterns), SQLite cache CRUD, i18n fallback chain, VF/VO detection,
+plugin registry + auto-discovery, AlloCiné HTML parser (with real fixture).
 
 ### E2E tests (Playwright + Electron, ~60s)
 
@@ -117,111 +118,170 @@ npm run package:dmg   # build + macOS .dmg only (arm64)
 
 Combined example: `ARVE_DEBUG=1 ARVE_NO_CACHE=1 npm run dev`
 
-Version bumping is explicit via `npm version <patch|minor|major>` (no auto-bump in scripts).
-
 ## Security
 
 - **CSP** locked down in `index.html` — `default-src 'self'`, `script-src 'self'`, `connect-src 'self'`, no `unsafe-eval`, no remote `connect-src`
 - **Preload**: `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`
-- **Renderer navigation**: `will-navigate` blocks all remote origins AND restricts `file://` to the actual built `renderer/index.html` (path-compared, Windows drive-letter aware)
+- **Renderer navigation**: `will-navigate` blocks all remote origins AND restricts `file://` to the actual built `renderer/index.html`
 - **Window-open**: renderer-initiated window creation is denied on the main window and on any future `webContents`
-- **Hidden `browserFetch` window** (used for Cloudflare bypass): explicit deny handlers for `setWindowOpenHandler`, `will-navigate` (deny all), `will-redirect` (same-registrable-domain allow-list only), plus `setPermissionRequestHandler` / `setPermissionCheckHandler` returning `false`
+- **Hidden `browserFetch` window** (used for Cloudflare bypass): explicit deny handlers for `setWindowOpenHandler`, `will-navigate`, `will-redirect`, plus `setPermissionRequestHandler` / `setPermissionCheckHandler` returning `false`
 - **`tickets:open` IPC**: HTTPS-only URL validation via `new URL().protocol` check before `shell.openExternal`
-- **Body-read timeout**: `readBodyWithTimeout` helper bounds the body read independently of headers timeout — prevents slow-trickle DoS
-- **Single instance**: `app.requestSingleInstanceLock()` — second launch focuses the existing window instead of spawning a new one
+- **Single instance**: `app.requestSingleInstanceLock()` — second launch focuses the existing window
 - **Packaged menu**: full menu stripped in `app.isPackaged` so DevTools isn't exposed to end users
-- **Known residual audit findings**: all in transitive dev-only deps (node-gyp, tar, extract-zip, esbuild, vite) — none reach production runtime. Awaiting upstream releases compatible with Electron 33.
 
 ## Architecture
 
 ```
 src/
 ├── main/
-│   ├── index.ts                 Electron main process (window lifecycle, IPC, security handlers)
+│   ├── index.ts                 Electron main process (window lifecycle, IPC, security, shutdown)
 │   ├── tz.ts                    Forces process.env.TZ = 'Europe/Paris' before any Date construction
 │   ├── cinemas/
-│   │   ├── registry.ts           Drop-in cinema registry (add one line)
+│   │   ├── registry.ts           Auto-discovers cinema instances via import.meta.glob()
 │   │   ├── types.ts              CinemaAdapter interface + Movie/Showtime types
-│   │   ├── boxOfficeApiAdapter   JSON API adapter (Mont-Blanc, Cluses, Bonneville)
-│   │   ├── cineChateauAdapter    ⚠️ Sleeping backup — old HTML scraper for Bonneville (now uses boxOfficeApi)
-│   │   └── cineVoxAdapter        HTML scraper (Chamonix, ISO-8859-1, URL-timestamp based)
+│   │   ├── adapters/             Drop-in adapter plugins (auto-discovered)
+│   │   │   ├── plugin.ts         CinemaAdapterPlugin interface + helpers
+│   │   │   ├── index.ts          Auto-discovery via import.meta.glob()
+│   │   │   ├── boxOfficeApi.ts   Gatsby + boxofficeapi (Mont-Blanc, Cluses, Bonneville)
+│   │   │   ├── cineVox.ts        cotecine CMS HTML scraper (Chamonix)
+│   │   │   ├── cineChateau.ts    cotecine CMS (sleeping backup)
+│   │   │   └── examplePlugin.ts  Canary/template — proves auto-discovery works
+│   │   └── instances/           Cinema instances (auto-discovered, one file per cinema)
+│   │       ├── montBlanc.ts      Ciné Mont-Blanc (Sallanches)
+│   │       ├── cluses.ts         Ciné de Cluses (Cluses)
+│   │       ├── bonneville.ts     Ciné Château (Bonneville)
+│   │       ├── chamonix.ts       Cinéma Vox (Chamonix)
+│   │       └── _exampleInstance.ts  Canary/template
 │   └── ratings/
-│       ├── ratingsEnricher.ts    Three-phase progressive enrichment (Wikidata IDs → IMDB dataset lookup → per-film AlloCiné/RT)
-│       ├── cacheDb.ts             **Single SQLite cache** (`cache.db`) — `ids_cache` + `ratings_cache` + `imdb_ratings` + `meta` tables. Auto-migrates old JSON files.
-│       ├── wikidataClient.ts     SPARQL batch + per-film title search (IDs only, with year disambiguation)
-│       ├── allocineClient.ts      AlloCiné scraper (browserFetch, `rating-mdl nXX` parser)
-│       ├── imdbDatasetClient.ts   **IMDB ratings via official dataset** — stored in shared `cache.db` `imdb_ratings` table (36h refresh, in-background)
-│       ├── imdbClient.ts          ⚠️ Sleeping backup — per-film IMDB HTML scraper (browserFetch). Not imported by active code.
-│       ├── imdbGraphqlClient.ts   ⚠️ Sleeping backup / dev probe — IMDB GraphQL batch. Not imported by active code.
-│       ├── rottenTomatoesClient  RT scraper (pooledFetch, JSON-LD tomatometer)
-│       └── browserFetch.ts        Hidden BrowserWindow (bypasses Cloudflare for AlloCiné, same-domain redirects only, ad-blocker)
-├── preload/index.ts             contextBridge (narrow IPC surface — `cinemas:list`, `schedule:fetch`, `tickets:open`, `rating:updated`, `ratings:progress`, `network:activity`)
+│       ├── ratingsEnricher.ts    Orchestrator (154 lines) — Phase 0 → 1a → 1b → 1.5 → 2
+│       ├── idResolver.ts         Wikidata ID resolution + cache management
+│       ├── ratingsFetcher.ts     AlloCiné + RT + IMDB scraping + retry logic
+│       ├── cacheDb.ts            Single SQLite cache (ids_cache + ratings_cache + imdb_ratings + meta)
+│       ├── wikidataClient.ts     MediaWiki search API (haswbstatement + wbgetentities) — NO SPARQL
+│       ├── allocineClient.ts     AlloCiné scraper (pooledFetch first, browserFetch fallback for Cloudflare)
+│       ├── imdbDatasetClient.ts  IMDB ratings via official dataset (36h refresh, in-background)
+│       ├── rottenTomatoesClient RT scraper (pooledFetch, JSON-LD tomatometer)
+│       ├── browserFetch.ts       Hidden BrowserWindow pool (per-domain reuse, Cloudflare bypass, ad-blocker)
+│       ├── networkRecorder.ts    Record/replay all HTTP traffic for deterministic tests
+│       ├── logger.ts             Pluggable logging (console + memory + file dispatchers)
+│       ├── moduleLoggers.ts      Per-component logger instances
+│       ├── networkActivity.ts    Tracks in-flight requests for UI spinner
+│       └── shutdown.ts          Cancellation flag for background workers
+├── preload/index.ts             contextBridge (narrow IPC surface)
 ├── renderer/
-│   ├── App.tsx                  Shell + filter pipeline + sort
-│   ├── components/              14 React components (ErrorBoundary, DaySelector, CinemaSelector, DoubleRangeSlider, MovieCard, ShowtimeList, WeekGrid, FilterBar, CinemaStatusBanner, SortSelector, ViewToggle, ProgressBar, ExportButton, AboutPanel)
-│   ├── types/index.ts           Re-exports shared types
+│   ├── App.tsx                  Shell + filter pipeline + sort + dedup (both views)
+│   ├── hooks/                   Custom React hooks (useTheme, useSchedule, useRatingsIPC, useRetryFailedLookups)
+│   ├── components/              15 React components
+│   ├── styles/                  Design tokens (tokens.ts) + shared presets (components.ts)
 │   └── api/cinemaApi.ts         IPC wrapper (typed)
 └── shared/
     ├── types.ts                 Single source of truth (Movie, Showtime, CinemaInfo, etc.)
-    ├── cinema.ts                Date/time/format helpers (timezone-safe via Intl with Europe/Paris)
-    ├── i18n.ts                  All UI strings (fr/en)
-    ├── userAgent.ts             Dynamic `ArveCinema/{version}` User-Agent
+    ├── cinema.ts                Date/time/format helpers + dedupTitle()
+    ├── i18n.ts                  All UI strings (fr/en) — 102 keys, fallback chain, tFmt, formatDecimal
+    ├── titleRules/              Systematic title-cleaning rules (fr.ts + en.ts, 44 patterns)
+    ├── userAgent.ts             `ArveCinema/{version} (https://github.com/SylvainSouche/arvecinema)`
     ├── connectionPool.ts        Per-domain rate-limited fetch (serialized per host, 2s default delay)
-    └── fetchWithTimeout.ts      AbortController-based fetch timeout + readBodyWithTimeout helper + TimeoutError
+    └── fetchWithTimeout.ts      AbortController-based fetch timeout + record/replay wiring
 ```
 
 ## Adding a cinema
 
-Open `src/main/cinemas/registry.ts` and append:
+**Using an existing adapter type** (e.g. another boxofficeapi site) — drop a file in `instances/`:
 
-```ts
-{
-  id: 'my-cinema',
-  name: 'Ciné Example',
-  city: 'Example',
-  color: '#ff6600',
-  adapter: createBoxOfficeApiAdapter('my-cinema', {
-    baseUrl: 'https://www.example-cinema.fr',
-    theaterId: 'PXXXX',
-  }),
-}
+```typescript
+// src/main/cinemas/instances/megeve.ts
+import type { CinemaInstance } from '../adapters/plugin';
+
+const cinema: CinemaInstance = {
+  id: 'megève',
+  name: 'Ciné Megève',
+  city: 'Megève',
+  color: '#f59e0b',
+  adapter: {
+    kind: 'boxofficeapi',
+    baseUrl: 'https://www.cinema-megève.fr',
+    theaterId: 'P9999',
+  },
+};
+
+export default cinema;
 ```
 
-Two adapter factories are provided:
+No other file needs editing. Restart the app and the cinema appears.
 
-- `createBoxOfficeApiAdapter` — for gatsby-source-boxofficeapi sites (JSON API)
-- `createCineChateauAdapter` / `createCineVoxAdapter` — for cotecine.fr sites (HTML scraping, ISO-8859-1 aware)
+**Adding a new adapter type** — drop a file in `adapters/`:
+
+```typescript
+// src/main/cinemas/adapters/myAdapter.ts
+import type { CinemaAdapter } from '../types';
+import type { CinemaAdapterPlugin, CinemaConfig } from './plugin';
+
+const plugin: CinemaAdapterPlugin = {
+  id: 'myadapter',
+  displayName: 'My Custom Adapter',
+  // ...validateConfig, createAdapter
+};
+
+export default plugin;
+```
+
+Then reference it from a cinema instance file with `adapter: { kind: 'myadapter', ... }`.
+See `src/main/cinemas/adapters/README.md` for the full contract.
 
 ## Ratings pipeline
 
-Three-phase progressive enrichment:
+Five-phase progressive enrichment:
 
-1. **Phase 1** (fast, parallel): Wikidata lookup by AlloCiné ID or title + year → resolves QID, IMDB ID, RT path, AlloCiné ID. UI shows source icons immediately, before any score is fetched.
-2. **Phase 1.5** (instant): all movies with an IMDB ID are looked up in the local **SQLite database** (`cache.db`, table `imdb_ratings`, populated from IMDB's official public dataset `title.ratings.tsv.gz` — 1.71M rated titles, refreshed every 36h). Sync `SELECT ... WHERE tconst IN (...)` query — no network calls at request time. `rating:updated` IPC fires per-film as each result lands.
-   - The SQLite DB lives at `~/Library/Application Support/ArveCinema/cache.db` (macOS) / `~/.config/ArveCinema/cache.db` (Linux) / `%APPDATA%\ArveCinema\cache.db` (Windows).
-   - The `.tsv.gz` is downloaded to a temp file, parsed, inserted into SQLite in a transaction, then deleted — only the DB is kept on disk.
-   - Refresh logic: on startup, check the `meta.last_update` row in the DB. If older than 36h (or DB empty), kick off a background refresh. **Does NOT block UI** — the app shows whatever's in the DB immediately, and re-emits `rating:updated` for any films whose ratings changed after the refresh completes.
-3. **Phase 2** (slow, per-film, progressive): AlloCiné + Rotten Tomatoes scraping via `browserFetch` (hidden BrowserWindow with ad/tracker blocker). IMDB is NOT scraped — the dataset is the single source of truth.
+1. **Phase 0** (instant, SQLite): apply cached Wikidata IDs + cached ratings (24h TTL).
+2. **Phase 1a** (fast, sequential): batch Wikidata lookup by AlloCiné ID via MediaWiki search API (`haswbstatement:P1265=`). No SPARQL — 10× faster, no timeouts.
+3. **Phase 1b** (per-film, fallback): Wikidata title search for films without AlloCiné IDs. Uses `wbsearchentities` + `wbgetentities`. Title cleaning rules strip avant-première/extended/director's cut/etc. before searching. Retry with original title if cleaned search yields nothing.
+4. **Phase 1.5** (instant, SQLite): batch IMDB dataset lookup — all films with an IMDB ID are looked up in the local SQLite database (1.71M rated titles, refreshed every 36h in background).
+5. **Phase 2** (slow, per-film, progressive): AlloCiné + Rotten Tomatoes scraping. AlloCiné uses `pooledFetch` (raw HTML, ~50 KB) with `browserFetch` fallback for Cloudflare. RT uses `pooledFetch`.
 
-Each source completion fires a `rating:updated` IPC event so the score appears progressively next to its icon in the UI. Failed sources surface a `❓` placeholder.
+Each source completion fires a `rating:updated` IPC event so the score appears progressively.
+Failed sources show a red ⚠ badge with the error message. A ⚡ retry button appears in the header when blocked sources exist.
 
-Cloudflare-protected sites (AlloCiné) are scraped via a hidden Electron `BrowserWindow` that runs real Chromium JS. Cloudflare's `cf_clearance` cookie is persisted in a per-domain partition so subsequent requests skip the challenge.
+### Wikidata
 
-Storage in the user data dir:
+- Uses the **MediaWiki Action API** (`www.wikidata.org/w/api.php`), NOT SPARQL
+- `haswbstatement:P1265=<allocineId>` search to find QIDs by property value
+- `wbgetentities` batch fetch (up to 50 IDs per call) for IMDB/RT/TMDB IDs
+- `wbsearchentities` for title-based fallback search
+- Sequential calls with 200ms delay to respect Wikimedia rate limits
+- User-Agent includes GitHub URL per [Wikimedia UA policy](https://meta.wikimedia.org/wiki/User-Agent_policy)
+- Entities with no external IDs are NOT cached (re-checked each launch until IDs appear)
 
-- **`cache.db`** — single SQLite file containing all caches (see below)
-- **In-flight dedup**: concurrent lookups for the same film share a single network request via `inflightIds` / `inflightRatings` Maps
+### Title cleaning
+
+Systematic rules in `src/shared/titleRules/` strip cinema-event labels before Wikidata search and movie deduplication:
+
+- **French**: avant-première, soirée spéciale, séance spéciale, événement spécial, exclusivité, version longue/courte/intégrale/restaurée, copie restaurée, partie N, metropolitan opera, opéra de Paris, bastille, concert, live, en direct, retransmission, captation
+- **English**: advance screening, preview, special screening, exclusive, limited engagement, one night only, extended, extended cut/edition, remastered, director's cut, final cut, ultimate edition, uncut, unrated, IMAX, 3D, 4K, part N, met opera, live concert, in theaters, broadcast/streaming
+
+If the cleaned title yields no results, retries with the original title (some films genuinely have "Extended" in their name).
 
 ### `cache.db` schema
 
-| Table           | Keyed by                                                 | TTL       | Purpose                                                    |
-| --------------- | -------------------------------------------------------- | --------- | ---------------------------------------------------------- |
-| `ids_cache`     | `cache_key` (e.g. `allocine:55774` or `title:cars:2006`) | Permanent | Wikidata → IMDB/RT/AlloCiné ID resolution                  |
-| `ratings_cache` | `qid`                                                    | 24h       | Scraped AlloCiné/RT scores per film                        |
-| `imdb_ratings`  | `tconst`                                                 | 36h       | IMDB dataset (1.71M rated titles), refreshed in background |
-| `meta`          | `key`                                                    | —         | Generic key/value (e.g. `imdb_dataset_last_update`)        |
+| Table           | Keyed by                                                 | TTL        | Purpose                                                    |
+| --------------- | -------------------------------------------------------- | ---------- | ---------------------------------------------------------- |
+| `ids_cache`     | `cache_key` (e.g. `allocine:55774` or `title:cars:2006`) | Permanent* | Wikidata → IMDB/RT/AlloCiné ID resolution                  |
+| `ratings_cache` | `qid`                                                    | 24h        | Scraped AlloCiné/RT scores per film                        |
+| `imdb_ratings`  | `tconst`                                                 | 36h        | IMDB dataset (1.71M rated titles), refreshed in background |
+| `meta`          | `key`                                                    | —          | Generic key/value (e.g. `imdb_dataset_last_update`)        |
 
-Old JSON cache files (`ids-cache.json`, `ratings-cache.json`) and the old standalone `imdb-ratings.db` are auto-migrated to SQLite on first launch (see `cacheDb.migrateJsonCaches()`), then renamed to `.archived` so we don't re-import them.
+\* Only cached if the Wikidata entity has at least one external ID (IMDB/RT/AlloCiné). Entities with no IDs are re-checked each launch.
+
+The SQLite DB lives at `~/Library/Application Support/ArveCinema/cache.db` (macOS) / `~/.config/ArveCinema/cache.db` (Linux) / `%APPDATA%\ArveCinema\cache.db` (Windows).
+
+## Diagnostics
+
+Open ℹ️ → 🩺 Diagnostics tab to see:
+
+- Per-cinema health (✅/⚠️/❌ + error messages)
+- Per-rating-source counts (ok/blocked/absent/pending)
+- Blocked films list with their specific error messages
+- "Copy diagnostics" button — copies a structured report to clipboard for GitHub issues
+- "Report issue" button — opens GitHub issues page
 
 ## License
 
