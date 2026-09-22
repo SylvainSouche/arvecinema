@@ -1,0 +1,48 @@
+{
+  "$schema": "./cinemas.config.schema.json",
+  "cinemas": [
+    {
+      "id": "mont-blanc",
+      "name": "Ciné Mont-Blanc",
+      "city": "Sallanches",
+      "color": "#e50914",
+      "adapter": {
+        "kind": "boxofficeapi",
+        "baseUrl": "https://www.cinemontblanc.fr",
+        "theaterId": "P1798"
+      }
+    },
+    {
+      "id": "cluses",
+      "name": "Ciné de Cluses",
+      "city": "Cluses",
+      "color": "#3b82f6",
+      "adapter": {
+        "kind": "boxofficeapi",
+        "baseUrl": "https://www.cine-cluses.fr",
+        "theaterId": "P6733"
+      }
+    },
+    {
+      "id": "bonneville",
+      "name": "Ciné Château",
+      "city": "Bonneville",
+      "color": "#10b981",
+      "adapter": {
+        "kind": "boxofficeapi",
+        "baseUrl": "https://www.cinechateau.fr",
+        "theaterId": "W7412"
+      }
+    },
+    {
+      "id": "chamonix",
+      "name": "Cinéma Vox",
+      "city": "Chamonix",
+      "color": "#a855f7",
+      "adapter": {
+        "kind": "cinevox",
+        "baseUrl": "https://www.cinemavox-chamonix.com"
+      }
+    }
+  ]
+}

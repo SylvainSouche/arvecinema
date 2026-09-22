@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────────────────────
-# CI — runs on every PR and push to main.
+# CI — runs on every PR and push to master.
 #
 # Jobs:
 #   1. lint-and-test — typecheck + vitest unit tests + smoke tests
@@ -14,9 +14,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 # Cancel in-progress runs for the same branch when a new commit is pushed.
 # Saves CI minutes when force-pushing during development.
