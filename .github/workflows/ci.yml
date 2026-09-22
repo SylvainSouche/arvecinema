@@ -40,23 +40,14 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        # --no-audit --no-fund: skip optional npm network calls for speed
-        # We DON'T use npm ci because postinstall runs electron-builder
-        # install-app-deps which rebuilds native modules for Electron —
-        # that's needed for the build job, not for tests. For tests we
-        # need better-sqlite3 rebuilt for the system Node, which happens
-        # via `npm rebuild better-sqlite3` below.
         run: npm install --no-audit --no-fund
-
-      - name: Rebuild native modules for system Node
-        # better-sqlite3 ships prebuilt for Electron's Node ABI, but vitest
-        # runs on the system Node. Rebuild to match.
-        run: npm rebuild better-sqlite3
 
       - name: Typecheck
         run: npm run typecheck
 
       - name: Run unit tests
+        # npm test automatically rebuilds better-sqlite3 for system Node
+        # via the rebuild:node script prefix.
         run: npm test
 
       - name: Run i18n smoke test
@@ -83,14 +74,8 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Rebuild native modules for Electron
-        # The build needs better-sqlite3 compiled for Electron's Node ABI
-        # (not the system Node). electron-builder's postinstall handles this
-        # automatically, but we run it explicitly to be safe.
-        run: npx electron-builder install-app-deps
-
       - name: Build
+        # npm run build automatically rebuilds for Electron via rebuild:electron
         run: npm run build
         env:
-          # electron-vite needs to know we're not in a dev environment
           NODE_ENV: production

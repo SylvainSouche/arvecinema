@@ -3,12 +3,12 @@
 # ArveCinema — available npm commands
 # ──────────────────────────────────────────────────────────────────────────
 cat << 'TEXT'
-ArveCinema v0.12.7
+ArveCinema v0.14.9
 
 DEVELOPMENT
-  npm run dev              Launch app in dev mode (hot reload)
+  npm run dev              Launch app in dev mode (rebuilds for Electron, hot reload)
   npm run debug            Same + ARVE_DEBUG=1 (verbose logs, DevTools)
-  npm run build            Compile to out/ (main + preload + renderer)
+  npm run build            Compile to out/ (rebuilds for Electron)
   npm run preview          Run built app from out/ without rebuilding
 
 CODE QUALITY
