@@ -1,14 +1,8 @@
-# ──────────────────────────────────────────────────────────────────────────
-# CI — runs on every PR and push to master.
+# CI - runs on every PR and push to master.
 #
 # Jobs:
-#   1. lint-and-test — typecheck + vitest unit tests + smoke tests
-#   2. build          — electron-vite build (verifies the app compiles)
-#
-# The build job runs on Linux only (fastest + cheapest). macOS/Linux
-# packaging is tested locally before releases; CI focuses on catching
-# regressions in the shared code.
-# ──────────────────────────────────────────────────────────────────────────
+#   1. lint-and-test - typecheck + vitest unit tests + smoke tests
+#   2. build         - electron-vite build (verifies the app compiles)
 
 name: CI
 
@@ -18,8 +12,6 @@ on:
   pull_request:
     branches: [master]
 
-# Cancel in-progress runs for the same branch when a new commit is pushed.
-# Saves CI minutes when force-pushing during development.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -46,8 +38,6 @@ jobs:
         run: npm run typecheck
 
       - name: Run unit tests
-        # npm test automatically rebuilds better-sqlite3 for system Node
-        # via the rebuild:node script prefix.
         run: npm test
 
       - name: Run i18n smoke test
@@ -75,7 +65,6 @@ jobs:
         run: npm install --no-audit --no-fund
 
       - name: Build
-        # npm run build automatically rebuilds for Electron via rebuild:electron
         run: npm run build
         env:
           NODE_ENV: production
