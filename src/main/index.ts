@@ -344,20 +344,6 @@ ipcMain.handle('log:clear', () => {
   return true;
 });
 
-// DEV-ONLY: probe the IMDB Top 250 GraphQL endpoint to verify anonymous
-// access works. Exposed as IPC so it can be invoked from the renderer's
-// DevTools console via `window.arveProbeTop250()`.
-ipcMain.handle('dev:probe-top250', async (): Promise<string> => {
-  if (app.isPackaged) {
-    return 'probe disabled in packaged builds';
-  }
-  try {
-    const { probeTop250 } = await import('./ratings/imdbGraphqlClient');
-    return await probeTop250();
-  } catch (err) {
-    return `probe failed: ${err instanceof Error ? err.message : String(err)}`;
-  }
-});
 
 ipcMain.handle('tickets:open', async (_evt, url: unknown): Promise<boolean> => {
   if (typeof url !== 'string' || !url) return false;

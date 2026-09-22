@@ -54,11 +54,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('network:activity', handler);
   },
 
-  /** DEV-ONLY: probe the IMDB Top 250 GraphQL endpoint to verify anonymous
-   *  access via `caching.graphql.imdb.com`. Returns the raw response body
-   *  (or an error message). Disabled in packaged builds. */
-  probeTop250: () => ipcRenderer.invoke('dev:probe-top250'),
-
   /** DEV-ONLY: fetch ALL movies from ALL 4 cinemas (ignoring the UI's cinema
    *  selector), trigger ratings enrichment, and return the full movie list.
    *  Used by the JSON export button to dump everything. Disabled in packaged

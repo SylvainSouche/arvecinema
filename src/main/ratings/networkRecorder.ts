@@ -63,7 +63,7 @@ function loadReplayFixture(): FixtureMap | null {
     const data = JSON.parse(raw) as Record<string, RecordedResponse>;
     return new Map(Object.entries(data));
   } catch (err) {
-    console.error(`[network-recorder] failed to load replay fixture: ${err}`);
+    log.cacheDb.warn('[network-recorder] failed to load replay fixture: ' + (err instanceof Error ? err.message : String(err)));
     return null;
   }
 }
@@ -101,8 +101,8 @@ export function saveRecordedFixture(): void {
       `[network-recorder] saved ${recordStore.size} recorded responses to ${outPath}`,
     );
   } catch (err) {
-    console.error(
-      `[network-recorder] failed to save fixture: ${err instanceof Error ? err.message : String(err)}`,
+    log.browserFetch.warn(
+      '[network-recorder] failed to save fixture: ' + (err instanceof Error ? err.message : String(err)),
     );
   }
 }

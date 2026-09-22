@@ -196,8 +196,6 @@ declare global {
        *  when all in-flight operations complete. Used to animate the
        *  refresh icon as a spinner. Returns an unsubscribe function. */
       onNetworkActivity: (callback: (active: boolean) => void) => () => void;
-      /** DEV-ONLY: probe the IMDB Top 250 GraphQL endpoint. */
-      probeTop250?: () => Promise<string>;
       /** DEV-ONLY: fetch ALL movies from ALL cinemas for export. */
       exportAll?: () => Promise<{ movies: Movie[]; cinemaStatuses: CinemaStatus[] }>;
       /** Retry failed rating lookups. Pass the current movie list (with

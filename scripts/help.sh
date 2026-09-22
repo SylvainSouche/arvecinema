@@ -36,4 +36,8 @@ PACKAGING
   npm run package          Build + package for current platform
   npm run package:dir      Build + unpacked dir (faster, for testing)
   npm run package:dmg       Build + macOS .dmg only
+
+CLEANUP
+  npm run clean            Remove all untracked files (keeps node_modules)
+  npm run clean:full       Remove everything + reinstall from scratch
 TEXT

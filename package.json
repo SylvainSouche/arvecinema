@@ -1,6 +1,6 @@
 {
   "name": "arvecinema",
-  "version": "0.14.11",
+  "version": "0.14.13",
   "description": "Cinema showtimes app for the Arve Valley (Sallanches, Cluses, Bonneville, Chamonix)",
   "license": "BSD-3-Clause",
   "author": "ArveCinema contributors",
@@ -45,6 +45,8 @@
     "help": "bash scripts/help.sh",
     "format": "prettier --write \"src/**/*.{ts,tsx,html,css,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,html,css,json}\"",
+    "clean": "git clean -xfd -e node_modules -e out -e .vite -e cache.db -e cache.db-wal -e cache.db-shm && git reset --hard",
+    "clean:full": "git clean -xfd && git reset --hard && npm install",
     "package": "electron-vite build && electron-builder",
     "package:dir": "electron-vite build && electron-builder --dir",
     "package:dmg": "electron-vite build && electron-builder --mac dmg"
