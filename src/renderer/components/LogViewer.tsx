@@ -19,8 +19,8 @@ const LEVEL_COLORS: Record<string, string> = {
   debug: 'var(--text-faint)',
   info: 'var(--text-secondary)',
   log: 'var(--text-secondary)',
-  warn: '#eab308',
-  error: '#e50914',
+  warn: 'var(--brand-warning)',
+  error: 'var(--brand-error)',
 };
 
 const LEVEL_BG: Record<string, string> = {
@@ -99,12 +99,12 @@ export const LogViewer: React.FC = () => {
 
   const btnStyle: React.CSSProperties = {
     padding: '4px 10px',
-    borderRadius: 4,
+    borderRadius: 'var(--radius-sm)',
     border: '1px solid var(--border-light)',
     background: 'transparent',
     color: 'var(--text-muted)',
     cursor: 'pointer',
-    fontSize: 12,
+    fontSize: 'var(--text-base)',
   };
 
   const activeBtnStyle: React.CSSProperties = {
@@ -156,11 +156,11 @@ export const LogViewer: React.FC = () => {
             flex: 1,
             minWidth: 120,
             padding: '4px 8px',
-            borderRadius: 4,
+            borderRadius: 'var(--radius-sm)',
             border: '1px solid var(--border-light)',
             background: 'var(--bg-input)',
             color: 'var(--text-primary)',
-            fontSize: 12,
+            fontSize: 'var(--text-base)',
           }}
         />
 
@@ -169,11 +169,11 @@ export const LogViewer: React.FC = () => {
           onChange={(e) => setComponentFilter(e.target.value)}
           style={{
             padding: '4px 8px',
-            borderRadius: 4,
+            borderRadius: 'var(--radius-sm)',
             border: '1px solid var(--border-light)',
             background: 'var(--bg-input)',
             color: 'var(--text-primary)',
-            fontSize: 12,
+            fontSize: 'var(--text-base)',
           }}
         >
           <option value="">{t('allComponents')}</option>
@@ -186,7 +186,7 @@ export const LogViewer: React.FC = () => {
 
         <label
           style={{
-            fontSize: 11,
+            fontSize: 'var(--text-sm)',
             color: 'var(--text-muted)',
             display: 'flex',
             alignItems: 'center',
@@ -216,11 +216,11 @@ export const LogViewer: React.FC = () => {
           flex: 1,
           overflow: 'auto',
           background: 'var(--bg-card-2)',
-          borderRadius: 6,
+          borderRadius: 'var(--radius-md)',
           border: '1px solid var(--border)',
           padding: 8,
           fontFamily: 'ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace',
-          fontSize: 11,
+          fontSize: 'var(--text-sm)',
           lineHeight: 1.5,
           minHeight: 200,
         }}
@@ -237,16 +237,16 @@ export const LogViewer: React.FC = () => {
                 color: LEVEL_COLORS[entry.level] ?? 'var(--text-secondary)',
                 background: LEVEL_BG[entry.level] ?? 'transparent',
                 padding: '1px 4px',
-                borderRadius: 2,
+                borderRadius: 'var(--radius-sm)',
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-word',
               }}
             >
               <span style={{ color: 'var(--text-faint)' }}>{entry.timestamp}</span>{' '}
-              <span style={{ color: LEVEL_COLORS[entry.level], fontWeight: 600 }}>
+              <span style={{ color: LEVEL_COLORS[entry.level], fontWeight: 'var(--weight-semibold)' }}>
                 [{entry.level.toUpperCase()}]
               </span>{' '}
-              <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>[{entry.component}]</span>{' '}
+              <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>[{entry.component}]</span>{' '}
               {entry.message}
             </div>
           ))

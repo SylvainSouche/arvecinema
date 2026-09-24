@@ -36,7 +36,7 @@ export const MovieCard: React.FC<Props> = ({ movie, cinemas }) => {
         gap: 20,
         padding: 16,
         background: 'var(--bg-card)',
-        borderRadius: 12,
+        borderRadius: 'var(--radius-xl)',
         border: '1px solid var(--border)',
         alignItems: 'flex-start',
       }}
@@ -48,7 +48,7 @@ export const MovieCard: React.FC<Props> = ({ movie, cinemas }) => {
           width: 110,
           aspectRatio: '2 / 3',
           background: 'var(--bg-card-2)',
-          borderRadius: 8,
+          borderRadius: 'var(--radius-lg)',
           overflow: 'hidden',
           position: 'relative',
         }}
@@ -70,7 +70,7 @@ export const MovieCard: React.FC<Props> = ({ movie, cinemas }) => {
               alignItems: 'center',
               justifyContent: 'center',
               color: 'var(--text-faint)',
-              fontSize: 11,
+              fontSize: 'var(--text-sm)',
               textAlign: 'center',
               padding: 8,
             }}
@@ -85,16 +85,16 @@ export const MovieCard: React.FC<Props> = ({ movie, cinemas }) => {
         <h3
           style={{
             margin: 0,
-            fontSize: 22,
+            fontSize: 'var(--text-2xl)',
             color: 'var(--text-primary)',
-            fontWeight: 800,
+            fontWeight: 'var(--weight-extrabold)',
             lineHeight: 1.2,
             letterSpacing: -0.2,
           }}
         >
           {movie.title}
           {movie.release && (
-            <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-muted)', marginLeft: 8 }}>
+            <span style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-normal)', color: 'var(--text-muted)', marginLeft: 8 }}>
               {new Date(movie.release).getUTCFullYear()}
             </span>
           )}
@@ -116,9 +116,9 @@ export const MovieCard: React.FC<Props> = ({ movie, cinemas }) => {
                   background: cinema.color,
                   color: 'var(--text-primary)',
                   padding: '2px 9px',
-                  borderRadius: 4,
-                  fontSize: 11,
-                  fontWeight: 700,
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: 'var(--text-sm)',
+                  fontWeight: 'var(--weight-bold)',
                   letterSpacing: 0.3,
                 }}
               >
@@ -137,9 +137,9 @@ export const MovieCard: React.FC<Props> = ({ movie, cinemas }) => {
                 background: 'var(--text-primary)',
                 color: 'var(--bg-card)',
                 padding: '2px 9px',
-                borderRadius: 4,
-                fontSize: 11,
-                fontWeight: 700,
+                borderRadius: 'var(--radius-sm)',
+                fontSize: 'var(--text-sm)',
+                fontWeight: 'var(--weight-bold)',
                 letterSpacing: 0.3,
               }}
             >
@@ -152,9 +152,9 @@ export const MovieCard: React.FC<Props> = ({ movie, cinemas }) => {
                 background: 'transparent',
                 color: 'var(--text-primary)',
                 padding: '2px 9px',
-                borderRadius: 4,
-                fontSize: 11,
-                fontWeight: 700,
+                borderRadius: 'var(--radius-sm)',
+                fontSize: 'var(--text-sm)',
+                fontWeight: 'var(--weight-bold)',
                 letterSpacing: 0.3,
                 border: '1px solid var(--text-primary)',
               }}
@@ -163,10 +163,10 @@ export const MovieCard: React.FC<Props> = ({ movie, cinemas }) => {
             </span>
           )}
           {movie.genres && (
-            <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>· {movie.genres}</span>
+            <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>· {movie.genres}</span>
           )}
           {movie.runtime ? (
-            <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>
+            <span style={{ color: 'var(--text-dim)', fontSize: 'var(--text-sm)' }}>
               · {movie.runtime} {t('minutes')}
             </span>
           ) : null}
@@ -181,16 +181,16 @@ export const MovieCard: React.FC<Props> = ({ movie, cinemas }) => {
 
         {/* Director + actors */}
         <div
-          style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.45, marginTop: 4 }}
+          style={{ color: 'var(--text-secondary)', fontSize: 'var(--text-md)', lineHeight: 1.45, marginTop: 4 }}
         >
           <div>
-            <strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+            <strong style={{ color: 'var(--text-primary)', fontWeight: 'var(--weight-semibold)' }}>
               {t('realization')} :
             </strong>{' '}
             {movie.direction}
           </div>
           <div>
-            <strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+            <strong style={{ color: 'var(--text-primary)', fontWeight: 'var(--weight-semibold)' }}>
               {t('with_')} :
             </strong>{' '}
             {movie.casting}
@@ -202,7 +202,7 @@ export const MovieCard: React.FC<Props> = ({ movie, cinemas }) => {
             style={{
               margin: '6px 0 0',
               color: 'var(--text-muted)',
-              fontSize: 12,
+              fontSize: 'var(--text-base)',
               lineHeight: 1.5,
               display: '-webkit-box',
               WebkitLineClamp: 2,
@@ -293,14 +293,14 @@ const RatingBadges: React.FC<{ movie: Movie }> = ({ movie }) => {
           display: 'inline-flex',
           alignItems: 'center',
           gap: 2,
-          fontSize: 10,
+          fontSize: 'var(--text-xs)',
           color: isError ? 'var(--text-secondary)' : 'var(--text-faint)',
           padding: '2px 4px',
           border: isError ? '1px dashed rgba(229, 9, 20, 0.4)' : 'none',
-          borderRadius: 3,
+          borderRadius: 'var(--radius-sm)',
         }}
       >
-        <span style={{ fontSize: 9 }}>{label}</span>
+        <span style={{ fontSize: 'var(--text-xs)' }}>{label}</span>
         <span
           style={{
             width: 6,
@@ -310,7 +310,7 @@ const RatingBadges: React.FC<{ movie: Movie }> = ({ movie }) => {
             display: 'inline-block',
           }}
         />
-        <span style={{ fontSize: 9, opacity: 0.7 }}>{symbol}</span>
+        <span style={{ fontSize: 'var(--text-xs)', opacity: 0.7 }}>{symbol}</span>
       </span>
     );
   };
@@ -328,7 +328,7 @@ const RatingBadges: React.FC<{ movie: Movie }> = ({ movie }) => {
           style={{
             display: 'inline-flex',
             alignItems: 'center',
-            fontSize: 11,
+            fontSize: 'var(--text-sm)',
             color: 'var(--text-faint)',
             padding: '2px 6px',
           }}
@@ -357,7 +357,7 @@ const RatingBadges: React.FC<{ movie: Movie }> = ({ movie }) => {
               style={okBadgeStyle('rgba(245,197,24,0.1)', 'rgba(245,197,24,0.3)')}
             >
               <span aria-hidden>⭐</span>
-              <span style={{ color: '#f5c518' }}>{movie.imdbRating.toFixed(1)}</span>
+              <span style={{ color: 'var(--brand-imdb)' }}>{movie.imdbRating.toFixed(1)}</span>
             </button>
           ) : movie.imdbId && movie.imdbUrl ? (
             /* ID exists, rating not yet scraped — show faded icon with … */
@@ -373,7 +373,7 @@ const RatingBadges: React.FC<{ movie: Movie }> = ({ movie }) => {
               <span aria-hidden style={{ opacity: 0.5 }}>
                 ⭐
               </span>
-              <span style={{ color: 'rgba(245,197,24,0.5)', fontSize: 10 }}>…</span>
+              <span style={{ color: 'rgba(245,197,24,0.5)', fontSize: 'var(--text-xs)' }}>…</span>
             </a>
           ) : (
             <StatusBadge source="imdb" />
@@ -404,7 +404,7 @@ const RatingBadges: React.FC<{ movie: Movie }> = ({ movie }) => {
             >
               {movie.allocinePress !== undefined && (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                  <span aria-hidden style={{ fontSize: 9 }}>
+                  <span aria-hidden style={{ fontSize: 'var(--text-xs)' }}>
                     ✍
                   </span>
                   <span style={{ color: acColor(movie.allocinePress) }}>
@@ -414,7 +414,7 @@ const RatingBadges: React.FC<{ movie: Movie }> = ({ movie }) => {
               )}
               {movie.allocineAudience !== undefined && (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                  <span aria-hidden style={{ fontSize: 9 }}>
+                  <span aria-hidden style={{ fontSize: 'var(--text-xs)' }}>
                     👥
                   </span>
                   <span style={{ color: acColor(movie.allocineAudience) }}>
@@ -434,10 +434,10 @@ const RatingBadges: React.FC<{ movie: Movie }> = ({ movie }) => {
               title={`AlloCiné — ${t('openAllocine')}`}
               style={okBadgeStyle('rgba(251,204,5,0.05)', 'rgba(251,204,5,0.15)')}
             >
-              <span aria-hidden style={{ fontSize: 9, opacity: 0.5 }}>
+              <span aria-hidden style={{ fontSize: 'var(--text-xs)', opacity: 0.5 }}>
                 ✍
               </span>
-              <span style={{ color: 'rgba(251,204,5,0.5)', fontSize: 10 }}>…</span>
+              <span style={{ color: 'rgba(251,204,5,0.5)', fontSize: 'var(--text-xs)' }}>…</span>
             </a>
           ) : (
             <StatusBadge source="allocine" />
@@ -476,7 +476,7 @@ const RatingBadges: React.FC<{ movie: Movie }> = ({ movie }) => {
               <span aria-hidden style={{ opacity: 0.5 }}>
                 🍅
               </span>
-              <span style={{ color: 'var(--text-faint)', fontSize: 10 }}>…</span>
+              <span style={{ color: 'var(--text-faint)', fontSize: 'var(--text-xs)' }}>…</span>
             </a>
           ) : (
             <StatusBadge source="rt" />
@@ -491,10 +491,10 @@ const RatingBadges: React.FC<{ movie: Movie }> = ({ movie }) => {
 const okBadgeStyle = (bg: string, border: string): React.CSSProperties => ({
   background: bg,
   border: `1px solid ${border}`,
-  borderRadius: 4,
+  borderRadius: 'var(--radius-sm)',
   padding: '2px 8px',
-  fontSize: 11,
-  fontWeight: 600,
+  fontSize: 'var(--text-sm)',
+  fontWeight: 'var(--weight-semibold)',
   cursor: 'pointer',
   display: 'inline-flex',
   alignItems: 'center',

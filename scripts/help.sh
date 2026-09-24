@@ -2,8 +2,9 @@
 # ──────────────────────────────────────────────────────────────────────────
 # ArveCinema — available npm commands
 # ──────────────────────────────────────────────────────────────────────────
-cat << 'TEXT'
-ArveCinema v0.14.9
+VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "?")
+cat << TEXT
+ArveCinema v$VERSION
 
 DEVELOPMENT
   npm run dev              Launch app in dev mode (rebuilds for Electron, hot reload)

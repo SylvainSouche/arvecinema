@@ -33,7 +33,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { log } from './moduleLoggers';
+import { simpleLog as log } from './simpleLogger';
 
 const RECORD_PATH = process.env.ARVE_RECORD;
 const REPLAY_PATH = process.env.ARVE_REPLAY;
@@ -63,7 +63,7 @@ function loadReplayFixture(): FixtureMap | null {
     const data = JSON.parse(raw) as Record<string, RecordedResponse>;
     return new Map(Object.entries(data));
   } catch (err) {
-    log.cacheDb.warn('[network-recorder] failed to load replay fixture: ' + (err instanceof Error ? err.message : String(err)));
+    log.warn('[network-recorder] failed to load replay fixture: ' + (err instanceof Error ? err.message : String(err)));
     return null;
   }
 }
@@ -74,7 +74,7 @@ function getReplayStore(): FixtureMap | null {
     replayStore = loadReplayFixture();
     if (replayStore) {
       const count = replayStore.size;
-      log.browserFetch.info(
+      log.info(
         `[network-recorder] replay mode: loaded ${count} recorded responses from ${REPLAY_PATH}`,
       );
     }
@@ -97,11 +97,11 @@ export function saveRecordedFixture(): void {
 
   try {
     fs.writeFileSync(outPath, JSON.stringify(obj, null, 2));
-    log.browserFetch.info(
+    log.info(
       `[network-recorder] saved ${recordStore.size} recorded responses to ${outPath}`,
     );
   } catch (err) {
-    log.browserFetch.warn(
+    log.warn(
       '[network-recorder] failed to save fixture: ' + (err instanceof Error ? err.message : String(err)),
     );
   }

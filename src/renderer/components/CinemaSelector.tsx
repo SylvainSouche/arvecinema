@@ -50,19 +50,19 @@ export const CinemaSelector: React.FC<Props> = ({ cinemas, selectedIds, onChange
       alignItems: 'center',
       flexWrap: 'wrap',
     }}>
-      <span style={{ color: 'var(--text-muted)', fontSize: 13, marginRight: 4 }}>{t('cinema')} :</span>
+      <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-md)', marginRight: 4 }}>{t('cinema')} :</span>
 
       <button
         onClick={selectAll}
         style={{
           padding: '6px 12px',
-          borderRadius: 16,
+          borderRadius: 'var(--radius-2xl)',
           cursor: 'pointer',
-          fontWeight: 600,
-          fontSize: 12,
+          fontWeight: 'var(--weight-semibold)',
+          fontSize: 'var(--text-base)',
           border: allSelected ? '1px solid var(--text-primary)' : '1px solid var(--border-light)',
-          background: allSelected ? '#fff' : 'transparent',
-          color: allSelected ? '#000' : '#999',
+          background: allSelected ? 'var(--text-primary)' : 'transparent',
+          color: allSelected ? 'var(--bg-primary)' : 'var(--text-muted)',
         }}
       >
         {t('allCinemas')}
@@ -76,13 +76,13 @@ export const CinemaSelector: React.FC<Props> = ({ cinemas, selectedIds, onChange
             onClick={() => toggle(c.id)}
             style={{
               padding: '6px 12px',
-              borderRadius: 16,
+              borderRadius: 'var(--radius-2xl)',
               cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: 12,
+              fontWeight: 'var(--weight-semibold)',
+              fontSize: 'var(--text-base)',
               border: selected ? `1px solid ${c.color}` : '1px solid var(--border-light)',
               background: selected ? c.color : 'transparent',
-              color: selected ? '#fff' : '#999',
+              color: selected ? 'var(--bg-primary)' : '#999',
               display: 'inline-flex',
               alignItems: 'center',
               gap: 6,
@@ -90,11 +90,11 @@ export const CinemaSelector: React.FC<Props> = ({ cinemas, selectedIds, onChange
           >
             <span style={{
               width: 8, height: 8, borderRadius: '50%',
-              background: selected ? '#fff' : c.color,
+              background: selected ? 'var(--text-primary)' : c.color,
               display: 'inline-block',
             }} />
             {c.name}
-            <span style={{ opacity: 0.7, fontWeight: 400 }}>{c.city}</span>
+            <span style={{ opacity: 0.7, fontWeight: 'var(--weight-normal)' }}>{c.city}</span>
           </button>
         );
       })}

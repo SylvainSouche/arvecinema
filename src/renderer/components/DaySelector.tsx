@@ -31,13 +31,13 @@ export const DaySelector: React.FC<Props> = ({ availableDays, selectedDay, onSel
         style={{
           flex: '0 0 auto',
           padding: '8px 14px',
-          borderRadius: 10,
+          borderRadius: 'var(--radius-xl)',
           cursor: 'pointer',
-          fontWeight: 600,
-          fontSize: 13,
+          fontWeight: 'var(--weight-semibold)',
+          fontSize: 'var(--text-md)',
           border: allSelected ? '1px solid var(--text-primary)' : '1px solid var(--border-light)',
-          background: allSelected ? '#fff' : '#161616',
-          color: allSelected ? '#000' : '#ccc',
+          background: allSelected ? 'var(--text-primary)' : 'var(--bg-strip-active)',
+          color: allSelected ? 'var(--bg-primary)' : 'var(--text-secondary)',
           whiteSpace: 'nowrap',
         }}
       >
@@ -54,11 +54,11 @@ export const DaySelector: React.FC<Props> = ({ availableDays, selectedDay, onSel
             style={{
               flex: '0 0 auto',
               padding: '6px 14px',
-              borderRadius: 10,
+              borderRadius: 'var(--radius-xl)',
               cursor: 'pointer',
               border: sel ? '1px solid var(--text-primary)' : '1px solid var(--border-light)',
-              background: sel ? '#fff' : '#161616',
-              color: sel ? '#000' : '#ddd',
+              background: sel ? 'var(--text-primary)' : 'var(--bg-strip-active)',
+              color: sel ? 'var(--bg-primary)' : 'var(--text-secondary)',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
@@ -67,10 +67,10 @@ export const DaySelector: React.FC<Props> = ({ availableDays, selectedDay, onSel
               whiteSpace: 'nowrap',
             }}
           >
-            <span style={{ fontSize: 11, textTransform: 'capitalize', opacity: 0.8 }}>
+            <span style={{ fontSize: 'var(--text-sm)', textTransform: 'capitalize', opacity: 0.8 }}>
               {weekday}
             </span>
-            <span style={{ fontSize: 16, fontWeight: 700, lineHeight: 1 }}>
+            <span style={{ fontSize: 'var(--text-xl)', fontWeight: 'var(--weight-bold)', lineHeight: 1 }}>
               {dayNum}
             </span>
           </button>

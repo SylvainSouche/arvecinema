@@ -66,7 +66,7 @@ export function gracefulShutdown(): void {
 
   // Step 5: save recorded network fixture (if ARVE_RECORD was set).
   try {
-    const { saveRecordedFixture } = require('./networkRecorder');
+    const { saveRecordedFixture } = require('../shared/networkRecorder');
     saveRecordedFixture();
   } catch { /* recorder not loaded */ }
 

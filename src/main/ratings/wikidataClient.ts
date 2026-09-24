@@ -1,6 +1,6 @@
 import { fetchWithTimeout, REQUEST_TIMEOUT_MS } from '../../shared/fetchWithTimeout';
 import { APP_USER_AGENT } from '../../shared/userAgent';
-import { withNetworkTracking } from './networkActivity';
+import { withNetworkTracking } from '../../shared/networkActivity';
 import { log } from './moduleLoggers';
 import { cleanTitle as applyTitleRules } from '../../shared/titleRules';
 

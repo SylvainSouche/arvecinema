@@ -13,7 +13,7 @@ interface Props {
  *  cinema's color so it's scannable when multiple cinemas are visible. */
 export const ShowtimeList: React.FC<Props> = ({ showtimes, cinemas }) => {
   if (showtimes.length === 0) {
-    return <span style={{ color: 'var(--text-dim)', fontSize: 13 }}>{t('noShowtimes')}</span>;
+    return <span style={{ color: 'var(--text-dim)', fontSize: 'var(--text-md)' }}>{t('noShowtimes')}</span>;
   }
 
   return (
@@ -35,12 +35,12 @@ export const ShowtimeList: React.FC<Props> = ({ showtimes, cinemas }) => {
             }}
             style={{
               padding: '6px 12px',
-              borderRadius: 6,
-              background: st.ticketingUrl ? '#1a1a1a' : '#2a2a2a',
+              borderRadius: 'var(--radius-md)',
+              background: st.ticketingUrl ? 'var(--bg-card-2)' : 'var(--bg-pill)',
               color: 'var(--text-primary)',
               border: `1px solid ${color}40`,
-              fontSize: 13,
-              fontWeight: 600,
+              fontSize: 'var(--text-md)',
+              fontWeight: 'var(--weight-semibold)',
               display: 'inline-flex',
               alignItems: 'center',
               gap: 6,
@@ -62,11 +62,11 @@ export const ShowtimeList: React.FC<Props> = ({ showtimes, cinemas }) => {
             {v && (
               <span style={{
                 opacity: 0.95,
-                fontSize: 10,
+                fontSize: 'var(--text-xs)',
                 background: 'rgba(0,0,0,0.45)',
                 padding: '1px 5px',
-                borderRadius: 3,
-                fontWeight: 700,
+                borderRadius: 'var(--radius-sm)',
+                fontWeight: 'var(--weight-bold)',
               }}>
                 {v}
               </span>

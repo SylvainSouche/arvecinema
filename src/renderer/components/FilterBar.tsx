@@ -56,7 +56,7 @@ export const FilterBar: React.FC<Props> = ({
             top: '50%',
             transform: 'translateY(-50%)',
             color: 'var(--text-muted)',
-            fontSize: 14,
+            fontSize: 'var(--text-lg)',
             pointerEvents: 'none',
           }}
         >
@@ -74,16 +74,16 @@ export const FilterBar: React.FC<Props> = ({
             background: 'var(--bg-card-2)',
             color: 'var(--text-primary)',
             border: '1px solid var(--border-light)',
-            borderRadius: 18,
-            fontSize: 13,
+            borderRadius: 'var(--radius-2xl)',
+            fontSize: 'var(--text-md)',
             outline: 'none',
             transition: 'border-color 0.15s',
           }}
           onFocus={(e) => {
-            e.currentTarget.style.borderColor = '#555';
+            e.currentTarget.style.borderColor = 'var(--border-light)';
           }}
           onBlur={(e) => {
-            e.currentTarget.style.borderColor = '#333';
+            e.currentTarget.style.borderColor = 'var(--border)';
           }}
         />
         {search && (
@@ -99,7 +99,7 @@ export const FilterBar: React.FC<Props> = ({
               border: 'none',
               color: 'var(--text-muted)',
               cursor: 'pointer',
-              fontSize: 16,
+              fontSize: 'var(--text-xl)',
               padding: '4px 8px',
               lineHeight: 1,
             }}
@@ -119,13 +119,13 @@ export const FilterBar: React.FC<Props> = ({
               onClick={() => setAudioFilter(f)}
               style={{
                 padding: '7px 14px',
-                borderRadius: 18,
+                borderRadius: 'var(--radius-2xl)',
                 border: 'none',
                 cursor: 'pointer',
-                fontWeight: 600,
-                fontSize: 13,
-                background: active ? '#fff' : '#262626',
-                color: active ? '#000' : '#fff',
+                fontWeight: 'var(--weight-semibold)',
+                fontSize: 'var(--text-md)',
+                background: active ? 'var(--text-primary)' : 'var(--bg-pill)',
+                color: active ? 'var(--bg-primary)' : 'var(--text-primary)',
               }}
             >
               {f === 'ALL' ? t('allVersions') : f}
@@ -136,7 +136,7 @@ export const FilterBar: React.FC<Props> = ({
 
       {/* Double min/max hour slider — quarter-hour steps */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <span style={{ color: 'var(--text-muted)', fontSize: 13, flex: '0 0 auto' }}>
+        <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-md)', flex: '0 0 auto' }}>
           {t('hourRange')} :
         </span>
         <DoubleRangeSlider
@@ -154,9 +154,9 @@ export const FilterBar: React.FC<Props> = ({
           style={{
             color: 'var(--text-primary)',
             fontVariantNumeric: 'tabular-nums',
-            fontSize: 13,
+            fontSize: 'var(--text-md)',
             minWidth: 110,
-            fontWeight: 600,
+            fontWeight: 'var(--weight-semibold)',
           }}
         >
           {formatHour(minHour)} – {formatHour(maxHour)}
@@ -165,7 +165,7 @@ export const FilterBar: React.FC<Props> = ({
 
       {/* Sort mode — default by next screening proximity */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '0 0 auto' }}>
-        <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>{t('sortBy')} :</span>
+        <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-md)' }}>{t('sortBy')} :</span>
         <SortSelector value={sortMode} onChange={setSortMode} />
       </div>
     </div>

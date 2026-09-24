@@ -32,7 +32,7 @@ import { APP_USER_AGENT } from '../../../shared/userAgent';
 import { isVFTags, isVOTags, TIMEZONE } from '../types';
 import { toIsoDay, parseShowtimeDate } from '../../../shared/cinema';
 import { fetchWithTimeout, REQUEST_TIMEOUT_MS } from '../../../shared/fetchWithTimeout';
-import { withNetworkTracking } from '../../ratings/networkActivity';
+import { withNetworkTracking } from '../../../shared/networkActivity';
 import { log } from '../../ratings/moduleLoggers';
 
 const HEADERS: Record<string, string> = {

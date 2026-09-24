@@ -6,7 +6,7 @@ import path from 'path';
 import { CINEMAS, CINEMA_INFOS } from './cinemas/registry';
 import type { Movie, ScheduleResponse, CinemaStatus } from './cinemas/types';
 import { enrichWithRatings } from './ratings/ratingsEnricher';
-import { getNetworkActive } from './ratings/networkActivity';
+import { getNetworkActive } from '../shared/networkActivity';
 import { initLogging, getAllLogs, clearLogs } from './ratings/logger';
 import { log } from './ratings/moduleLoggers';
 

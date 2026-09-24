@@ -257,9 +257,9 @@ export const WeekGrid: React.FC<Props> = ({
               background: 'var(--bg-primary)',
               padding: '10px 14px',
               borderBottom: '1px solid var(--border-light)',
-              fontSize: 11,
+              fontSize: 'var(--text-sm)',
               color: 'var(--text-muted)',
-              fontWeight: 600,
+              fontWeight: 'var(--weight-semibold)',
               letterSpacing: 0.3,
               textTransform: 'uppercase',
             }}
@@ -290,10 +290,10 @@ export const WeekGrid: React.FC<Props> = ({
                         {hi === 0 && (
                           <div
                             style={{
-                              fontSize: 11,
+                              fontSize: 'var(--text-sm)',
                               color: 'var(--text-primary)',
                               textTransform: 'capitalize' as const,
-                              fontWeight: 700,
+                              fontWeight: 'var(--weight-bold)',
                               padding: '6px 0 2px',
                               textAlign: 'center',
                             }}
@@ -311,7 +311,7 @@ export const WeekGrid: React.FC<Props> = ({
                             bottom: '10px',
                             left: 0,
                             transform: 'translateX(-50%)',
-                            fontSize: 11,
+                            fontSize: 'var(--text-sm)',
                             fontWeight: inRange ? 600 : 400,
                             color: inRange ? 'var(--text-secondary)' : 'var(--text-faint)',
                             whiteSpace: 'nowrap',
@@ -349,7 +349,7 @@ export const WeekGrid: React.FC<Props> = ({
                                 bottom: '10px',
                                 right: 0,
                                 transform: 'translateX(50%)',
-                                fontSize: 11,
+                                fontSize: 'var(--text-sm)',
                                 fontWeight: inRange ? 600 : 400,
                                 color: inRange ? 'var(--text-secondary)' : 'var(--text-faint)',
                                 whiteSpace: 'nowrap',
@@ -450,7 +450,7 @@ const WeekRow: React.FC<WeekRowProps> = ({
             flex: '0 0 auto',
             width: POSTER_W,
             height: POSTER_H,
-            borderRadius: 4,
+            borderRadius: 'var(--radius-sm)',
             overflow: 'hidden',
             background: 'var(--bg-card-2)',
             position: 'relative',
@@ -479,7 +479,7 @@ const WeekRow: React.FC<WeekRowProps> = ({
                 alignItems: 'center',
                 justifyContent: 'center',
                 color: 'var(--text-faint)',
-                fontSize: 9,
+                fontSize: 'var(--text-xs)',
                 textAlign: 'center',
                 padding: 4,
               }}
@@ -502,9 +502,9 @@ const WeekRow: React.FC<WeekRowProps> = ({
         >
           <div
             style={{
-              fontSize: 10,
+              fontSize: 'var(--text-xs)',
               color,
-              fontWeight: 700,
+              fontWeight: 'var(--weight-bold)',
               textTransform: 'uppercase' as const,
               letterSpacing: 0.4,
               whiteSpace: 'nowrap',
@@ -517,8 +517,8 @@ const WeekRow: React.FC<WeekRowProps> = ({
           <div
             style={{
               color: 'var(--text-primary)',
-              fontWeight: 700,
-              fontSize: 14,
+              fontWeight: 'var(--weight-bold)',
+              fontSize: 'var(--text-lg)',
               lineHeight: 1.2,
               whiteSpace: 'nowrap',
               overflow: 'hidden',
@@ -530,8 +530,8 @@ const WeekRow: React.FC<WeekRowProps> = ({
           <div
             style={{
               color: 'var(--text-muted)',
-              fontSize: 11,
-              fontWeight: 400,
+              fontSize: 'var(--text-sm)',
+              fontWeight: 'var(--weight-normal)',
               lineHeight: 1.3,
               whiteSpace: 'nowrap',
               overflow: 'hidden',
@@ -563,12 +563,12 @@ const WeekRow: React.FC<WeekRowProps> = ({
               movie.rtStatus === undefined)) && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 1 }}>
               {movie.imdbRating !== undefined && (
-                <span style={{ color: '#f5c518', fontSize: 10, fontWeight: 700 }}>
+                <span style={{ color: 'var(--brand-imdb)', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-bold)' }}>
                   ⭐{movie.imdbRating.toFixed(1)}
                 </span>
               )}
               {(movie.allocinePress !== undefined || movie.allocineAudience !== undefined) && (
-                <span style={{ fontSize: 10, fontWeight: 600 }}>
+                <span style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)' }}>
                   {movie.allocinePress !== undefined && (
                     <span style={{ color: acColorCompact(movie.allocinePress) }}>
                       ✍{formatDecimal(movie.allocinePress)}
@@ -586,8 +586,8 @@ const WeekRow: React.FC<WeekRowProps> = ({
                 <span
                   style={{
                     color: scoreColorCompact(movie.rtTomatometer),
-                    fontSize: 10,
-                    fontWeight: 700,
+                    fontSize: 'var(--text-xs)',
+                    fontWeight: 'var(--weight-bold)',
                   }}
                 >
                   {movie.rtTomatometer >= 60 ? '🍅' : '🤢'}
@@ -598,7 +598,7 @@ const WeekRow: React.FC<WeekRowProps> = ({
                 movie.imdbStatus === undefined &&
                 movie.allocineStatus === undefined &&
                 movie.rtStatus === undefined && (
-                  <span style={{ color: 'var(--text-faint)', fontSize: 10 }}>❓</span>
+                  <span style={{ color: 'var(--text-faint)', fontSize: 'var(--text-xs)' }}>❓</span>
                 )}
             </div>
           )}
@@ -733,9 +733,9 @@ const ShowtimeChip: React.FC<ShowtimeChipProps> = ({
         padding: '4px 6px',
         background: color,
         color: 'var(--text-primary)',
-        borderRadius: 4,
-        fontSize: 11,
-        fontWeight: 700,
+        borderRadius: 'var(--radius-sm)',
+        fontSize: 'var(--text-sm)',
+        fontWeight: 'var(--weight-bold)',
         border: '1px solid rgba(255,255,255,0.15)',
         display: 'flex',
         alignItems: 'center',
@@ -751,11 +751,12 @@ const ShowtimeChip: React.FC<ShowtimeChipProps> = ({
       {v && width >= MIN_CHIP_WIDTH_FOR_BADGE && (
         <span
           style={{
-            fontSize: 9,
-            fontWeight: 700,
-            background: 'rgba(0,0,0,0.4)',
-            padding: '1px 4px',
-            borderRadius: 2,
+            fontSize: 'var(--text-xs)',
+            fontWeight: 'var(--weight-bold)',
+            background: 'var(--bg-pill)',
+            color: 'var(--text-primary)',
+            padding: '1px 5px',
+            borderRadius: 'var(--radius-sm)',
             flexShrink: 0,
           }}
         >
@@ -770,14 +771,14 @@ const ShowtimeChip: React.FC<ShowtimeChipProps> = ({
 
 const acColorCompact = (score: number | undefined): string => {
   if (score === undefined) return 'var(--text-muted)';
-  if (score >= 3.5) return '#10b981';
-  if (score >= 2.5) return '#eab308';
-  return '#e50914';
+  if (score >= 3.5) return 'var(--brand-success)';
+  if (score >= 2.5) return 'var(--brand-warning)';
+  return 'var(--brand-error)';
 };
 
 const scoreColorCompact = (score: number | undefined): string => {
   if (score === undefined) return 'var(--text-muted)';
-  if (score >= 75) return '#10b981';
-  if (score >= 60) return '#eab308';
-  return '#e50914';
+  if (score >= 75) return 'var(--brand-success)';
+  if (score >= 60) return 'var(--brand-warning)';
+  return 'var(--brand-error)';
 };

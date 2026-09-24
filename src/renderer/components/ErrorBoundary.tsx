@@ -45,9 +45,9 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
             fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif',
           }}
         >
-          <div style={{ fontSize: 40 }}>💥</div>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>{t('errorBoundaryTitle')}</h1>
-          <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 14, maxWidth: 480 }}>
+          <div style={{ fontSize: 'var(--text-3xl)' }}>💥</div>
+          <h1 style={{ margin: 0, fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)' }}>{t('errorBoundaryTitle')}</h1>
+          <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 'var(--text-lg)', maxWidth: 480 }}>
             {t('errorBoundaryMessage')}
           </p>
           <pre
@@ -55,9 +55,9 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
               margin: 0,
               background: 'var(--bg-card-2)',
               padding: '12px 16px',
-              borderRadius: 8,
-              color: '#e50914',
-              fontSize: 12,
+              borderRadius: 'var(--radius-lg)',
+              color: 'var(--brand-error)',
+              fontSize: 'var(--text-base)',
               maxWidth: 600,
               overflow: 'auto',
               textAlign: 'left',
@@ -69,12 +69,12 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
             onClick={this.reload}
             style={{
               padding: '10px 20px',
-              borderRadius: 8,
+              borderRadius: 'var(--radius-lg)',
               border: 'none',
               background: 'var(--text-primary)',
               color: 'var(--bg-primary)',
-              fontSize: 14,
-              fontWeight: 600,
+              fontSize: 'var(--text-lg)',
+              fontWeight: 'var(--weight-semibold)',
               cursor: 'pointer',
             }}
           >

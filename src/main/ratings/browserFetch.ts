@@ -1,7 +1,7 @@
 import { BrowserWindow, session } from 'electron';
-import { withNetworkTracking } from './networkActivity';
+import { withNetworkTracking } from '../../shared/networkActivity';
 import { log } from './moduleLoggers';
-import { isReplaying, isRecording, getReplayResponse, recordResponse } from './networkRecorder';
+import { isReplaying, isRecording, getReplayResponse, recordResponse } from '../../shared/networkRecorder';
 
 // ──────────────────────────────────────────────────────────────────────────
 // browserFetch — fetch a URL using a hidden Electron BrowserWindow.

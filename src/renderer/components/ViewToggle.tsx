@@ -15,7 +15,7 @@ export const ViewToggle: React.FC<Props> = ({ value, onChange }) => {
     <div style={{
       display: 'inline-flex',
       background: 'var(--bg-pill)',
-      borderRadius: 18,
+      borderRadius: 'var(--radius-2xl)',
       padding: 3,
       border: '1px solid var(--border-light)',
       flex: '0 0 auto',
@@ -29,14 +29,14 @@ export const ViewToggle: React.FC<Props> = ({ value, onChange }) => {
             aria-pressed={active}
             style={{
               padding: '6px 14px',
-              borderRadius: 16,
+              borderRadius: 'var(--radius-2xl)',
               border: 'none',
               cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: 13,
-              background: active ? '#fff' : 'transparent',
-              color: active ? '#000' : '#999',
-              transition: 'background 0.15s, color 0.15s',
+              fontWeight: 'var(--weight-semibold)',
+              fontSize: 'var(--text-md)',
+              background: active ? 'var(--text-primary)' : 'transparent',
+              color: active ? 'var(--bg-primary)' : 'var(--text-muted)',
+              transition: 'var(--transition-normal)',
             }}
           >
             {v === 'day' ? t('dayView') : t('weekView')}

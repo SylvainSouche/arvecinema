@@ -2,7 +2,7 @@
 // Network helpers — used by all cinema adapters.
 //
 // Supports record/replay via ARVE_RECORD / ARVE_REPLAY env vars.
-// See src/main/ratings/networkRecorder.ts for details.
+// See src/shared/networkRecorder.ts for details.
 // ──────────────────────────────────────────────────────────────────────────
 
 import {
@@ -11,7 +11,7 @@ import {
   getReplayResponse,
   createMockResponse,
   recordResponse,
-} from '../main/ratings/networkRecorder';
+} from './networkRecorder';
 
 /**
  * Wrap a `fetch()` call with AbortController-based timeouts covering BOTH

@@ -228,13 +228,13 @@ const overlayStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  zIndex: 1000,
+  zIndex: 'var(--z-modal)',
   animation: 'arve-about-fade 150ms ease-out',
 };
 const modalStyle: React.CSSProperties = {
   background: 'var(--bg-card)',
   border: '1px solid var(--border-light)',
-  borderRadius: 12,
+  borderRadius: 'var(--radius-xl)',
   boxShadow: '0 12px 48px rgba(0,0,0,0.4)',
   maxWidth: 800,
   width: 'calc(100% - 32px)',
@@ -250,13 +250,13 @@ const tabBtnStyle = (active: boolean): React.CSSProperties => ({
   background: active ? 'var(--bg-card-2)' : 'transparent',
   color: active ? 'var(--text-primary)' : 'var(--text-muted)',
   cursor: 'pointer',
-  fontSize: 13,
+  fontSize: 'var(--text-md)',
   fontWeight: active ? 600 : 400,
-  borderBottom: active ? '2px solid #4a9eff' : '2px solid transparent',
+  borderBottom: active ? '2px solid var(--brand-accent)' : '2px solid transparent',
 });
 const bodyStyle: React.CSSProperties = { padding: '24px 28px', overflow: 'auto', flex: 1 };
 const linkStyle: React.CSSProperties = {
-  color: '#4a9eff',
+  color: 'var(--brand-accent)',
   textDecoration: 'underline',
   cursor: 'pointer',
   background: 'none',
@@ -327,7 +327,7 @@ export const AboutPanel: React.FC<AboutPanelProps> = ({
               background: 'none',
               border: 'none',
               color: 'var(--text-muted)',
-              fontSize: 22,
+              fontSize: 'var(--text-2xl)',
               cursor: 'pointer',
               padding: '4px 14px',
             }}
@@ -345,19 +345,19 @@ export const AboutPanel: React.FC<AboutPanelProps> = ({
                   <h2
                     style={{
                       margin: 0,
-                      fontSize: 20,
-                      fontWeight: 700,
+                      fontSize: 'var(--text-xl)',
+                      fontWeight: 'var(--weight-bold)',
                       color: 'var(--text-primary)',
                     }}
                   >
                     ArveCinema
                   </h2>
-                  <p style={{ margin: '2px 0 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                  <p style={{ margin: '2px 0 0 0', fontSize: 'var(--text-base)', color: 'var(--text-muted)' }}>
                     v{version}
                   </p>
                 </div>
               </div>
-              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 }}>
+              <p style={{ fontSize: 'var(--text-md)', color: 'var(--text-secondary)', marginBottom: 4 }}>
                 <button
                   type="button"
                   style={linkStyle}
@@ -369,8 +369,8 @@ export const AboutPanel: React.FC<AboutPanelProps> = ({
 
               <h3
                 style={{
-                  fontSize: 13,
-                  fontWeight: 700,
+                  fontSize: 'var(--text-md)',
+                  fontWeight: 'var(--weight-bold)',
                   textTransform: 'uppercase',
                   letterSpacing: 0.5,
                   color: 'var(--text-muted)',
@@ -381,7 +381,7 @@ export const AboutPanel: React.FC<AboutPanelProps> = ({
               >
                 {t('aboutLicense')}
               </h3>
-              <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+              <p style={{ fontSize: 'var(--text-md)', color: 'var(--text-secondary)' }}>
                 {t('aboutLicenseIntro')}{' '}
                 <button
                   type="button"
@@ -398,9 +398,9 @@ export const AboutPanel: React.FC<AboutPanelProps> = ({
                 style={{
                   background: 'var(--bg-card-2)',
                   border: '1px solid var(--border)',
-                  borderRadius: 6,
+                  borderRadius: 'var(--radius-md)',
                   padding: '12px 14px',
-                  fontSize: 11,
+                  fontSize: 'var(--text-sm)',
                   color: 'var(--text-muted)',
                   whiteSpace: 'pre-wrap',
                   fontFamily: 'ui-monospace, monospace',
@@ -414,8 +414,8 @@ export const AboutPanel: React.FC<AboutPanelProps> = ({
 
               <h3
                 style={{
-                  fontSize: 13,
-                  fontWeight: 700,
+                  fontSize: 'var(--text-md)',
+                  fontWeight: 'var(--weight-bold)',
                   textTransform: 'uppercase',
                   letterSpacing: 0.5,
                   color: 'var(--text-muted)',
@@ -426,7 +426,7 @@ export const AboutPanel: React.FC<AboutPanelProps> = ({
               >
                 {t('aboutDependencies')}
               </h3>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-base)' }}>
                 <thead>
                   <tr>
                     <th
@@ -492,8 +492,8 @@ export const AboutPanel: React.FC<AboutPanelProps> = ({
 
               <h3
                 style={{
-                  fontSize: 13,
-                  fontWeight: 700,
+                  fontSize: 'var(--text-md)',
+                  fontWeight: 'var(--weight-bold)',
                   textTransform: 'uppercase',
                   letterSpacing: 0.5,
                   color: 'var(--text-muted)',
@@ -508,23 +508,23 @@ export const AboutPanel: React.FC<AboutPanelProps> = ({
                 style={{
                   background: 'var(--bg-card-2)',
                   border: '1px solid var(--border)',
-                  borderLeft: '3px solid #4a9eff',
-                  borderRadius: 6,
+                  borderLeft: '3px solid var(--brand-accent)',
+                  borderRadius: 'var(--radius-md)',
                   padding: '12px 14px',
                   margin: '8px 0',
                 }}
               >
                 <div
                   style={{
-                    fontSize: 12,
-                    fontWeight: 700,
+                    fontSize: 'var(--text-base)',
+                    fontWeight: 'var(--weight-bold)',
                     color: 'var(--text-primary)',
                     marginBottom: 4,
                   }}
                 >
                   {t('aboutPersonalUse')}
                 </div>
-                <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                <p style={{ fontSize: 'var(--text-md)', color: 'var(--text-secondary)' }}>
                   {t('aboutPersonalUseDescription')}
                 </p>
               </div>
@@ -532,26 +532,26 @@ export const AboutPanel: React.FC<AboutPanelProps> = ({
                 style={{
                   background: 'var(--bg-card-2)',
                   border: '1px solid var(--border)',
-                  borderLeft: '3px solid #4a9eff',
-                  borderRadius: 6,
+                  borderLeft: '3px solid var(--brand-accent)',
+                  borderRadius: 'var(--radius-md)',
                   padding: '12px 14px',
                   margin: '8px 0',
                 }}
               >
                 <div
                   style={{
-                    fontSize: 12,
-                    fontWeight: 700,
+                    fontSize: 'var(--text-base)',
+                    fontWeight: 'var(--weight-bold)',
                     color: 'var(--text-primary)',
                     marginBottom: 4,
                   }}
                 >
                   IMDb ratings
                 </div>
-                <p style={{ fontSize: 13, fontStyle: 'italic', color: 'var(--text-secondary)' }}>
+                <p style={{ fontSize: 'var(--text-md)', fontStyle: 'italic', color: 'var(--text-secondary)' }}>
                   "Information courtesy of IMDb (https://www.imdb.com). Used with permission."
                 </p>
-                <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
                   {t('aboutImdbDescription')}
                 </p>
               </div>
@@ -559,23 +559,23 @@ export const AboutPanel: React.FC<AboutPanelProps> = ({
                 style={{
                   background: 'var(--bg-card-2)',
                   border: '1px solid var(--border)',
-                  borderLeft: '3px solid #4a9eff',
-                  borderRadius: 6,
+                  borderLeft: '3px solid var(--brand-accent)',
+                  borderRadius: 'var(--radius-md)',
                   padding: '12px 14px',
                   margin: '8px 0',
                 }}
               >
                 <div
                   style={{
-                    fontSize: 12,
-                    fontWeight: 700,
+                    fontSize: 'var(--text-base)',
+                    fontWeight: 'var(--weight-bold)',
                     color: 'var(--text-primary)',
                     marginBottom: 4,
                   }}
                 >
                   Wikidata
                 </div>
-                <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                <p style={{ fontSize: 'var(--text-md)', color: 'var(--text-secondary)' }}>
                   {t('aboutWikidataDescription')}
                 </p>
                 <button
@@ -590,7 +590,7 @@ export const AboutPanel: React.FC<AboutPanelProps> = ({
               <p
                 style={{
                   textAlign: 'center',
-                  fontSize: 11,
+                  fontSize: 'var(--text-sm)',
                   color: 'var(--text-faint)',
                   margin: '24px 0 0 0',
                   paddingTop: 12,
@@ -615,8 +615,8 @@ export const AboutPanel: React.FC<AboutPanelProps> = ({
             <div>
               <h3
                 style={{
-                  fontSize: 13,
-                  fontWeight: 700,
+                  fontSize: 'var(--text-md)',
+                  fontWeight: 'var(--weight-bold)',
                   textTransform: 'uppercase',
                   letterSpacing: 0.5,
                   color: 'var(--text-muted)',
@@ -625,7 +625,7 @@ export const AboutPanel: React.FC<AboutPanelProps> = ({
               >
                 Export movie data
               </h3>
-              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
+              <p style={{ fontSize: 'var(--text-md)', color: 'var(--text-secondary)', marginBottom: 16 }}>
                 Export the current movie list ({movies.length} films) for debugging or analysis. CSV
                 includes ratings + IDs for spreadsheet analysis. JSON includes full data with
                 showtimes, cast, genres, and all status fields.
@@ -639,12 +639,12 @@ export const AboutPanel: React.FC<AboutPanelProps> = ({
                   }}
                   style={{
                     padding: '10px 20px',
-                    borderRadius: 8,
+                    borderRadius: 'var(--radius-lg)',
                     border: '1px solid var(--border-light)',
                     background: 'var(--bg-card-2)',
                     color: 'var(--text-primary)',
                     cursor: 'pointer',
-                    fontSize: 14,
+                    fontSize: 'var(--text-lg)',
                   }}
                 >
                   📊 CSV — ratings + IDs
@@ -657,12 +657,12 @@ export const AboutPanel: React.FC<AboutPanelProps> = ({
                   }}
                   style={{
                     padding: '10px 20px',
-                    borderRadius: 8,
+                    borderRadius: 'var(--radius-lg)',
                     border: '1px solid var(--border-light)',
                     background: 'var(--bg-card-2)',
                     color: 'var(--text-primary)',
                     cursor: 'pointer',
-                    fontSize: 14,
+                    fontSize: 'var(--text-lg)',
                   }}
                 >
                   📦 JSON — full data + showtimes
@@ -863,8 +863,8 @@ const DiagnosticsTab: React.FC<DiagnosticsTabProps> = ({
   };
 
   const headingStyle: React.CSSProperties = {
-    fontSize: 13,
-    fontWeight: 700,
+    fontSize: 'var(--text-md)',
+    fontWeight: 'var(--weight-bold)',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     color: 'var(--text-muted)',
@@ -878,7 +878,7 @@ const DiagnosticsTab: React.FC<DiagnosticsTabProps> = ({
     alignItems: 'center',
     gap: 8,
     padding: '4px 0',
-    fontSize: 13,
+    fontSize: 'var(--text-md)',
   };
 
   const statusDot = (status: string): string => {
@@ -896,7 +896,7 @@ const DiagnosticsTab: React.FC<DiagnosticsTabProps> = ({
         <h3 style={headingStyle}>ArveCinema</h3>
         <div style={rowStyle}>
           <span style={{ color: 'var(--text-muted)' }}>Version:</span>
-          <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>v{version}</span>
+          <span style={{ color: 'var(--text-primary)', fontWeight: 'var(--weight-semibold)' }}>v{version}</span>
         </div>
         <div style={rowStyle}>
           <span style={{ color: 'var(--text-muted)' }}>{t('diagnosticsNetworkIdle')}:</span>
@@ -908,7 +908,7 @@ const DiagnosticsTab: React.FC<DiagnosticsTabProps> = ({
         </div>
         <div style={rowStyle}>
           <span style={{ color: 'var(--text-muted)' }}>{t('diagnosticsMoviesLoaded')}:</span>
-          <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{movies.length}</span>
+          <span style={{ color: 'var(--text-primary)', fontWeight: 'var(--weight-semibold)' }}>{movies.length}</span>
         </div>
       </div>
 
@@ -926,14 +926,14 @@ const DiagnosticsTab: React.FC<DiagnosticsTabProps> = ({
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span>{statusDot(statusStr)}</span>
-                <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{cinema.name}</span>
+                <span style={{ color: 'var(--text-primary)', fontWeight: 'var(--weight-semibold)' }}>{cinema.name}</span>
                 <span style={{ color: 'var(--text-muted)' }}>({cinema.city})</span>
               </div>
               {error && (
                 <div
                   style={{
                     color: 'var(--brand-error)',
-                    fontSize: 12,
+                    fontSize: 'var(--text-base)',
                     marginLeft: 24,
                     wordBreak: 'break-word',
                   }}
@@ -956,7 +956,7 @@ const DiagnosticsTab: React.FC<DiagnosticsTabProps> = ({
             source === 'imdb' ? 'IMDB' : source === 'allocine' ? 'AlloCiné' : 'Rotten Tomatoes';
           return (
             <div key={source} style={{ ...rowStyle, justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{name}</span>
+              <span style={{ color: 'var(--text-primary)', fontWeight: 'var(--weight-semibold)' }}>{name}</span>
               <span style={{ color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
                 {s.ok > 0 && <span style={{ color: 'var(--brand-success)' }}>{s.ok} ✅ </span>}
                 {s.blocked > 0 && (
@@ -990,11 +990,11 @@ const DiagnosticsTab: React.FC<DiagnosticsTabProps> = ({
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span>⚠️</span>
-                <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{film.title}</span>
+                <span style={{ color: 'var(--text-primary)', fontWeight: 'var(--weight-semibold)' }}>{film.title}</span>
                 <span style={{ color: 'var(--text-muted)' }}>({film.cinemaId})</span>
               </div>
               {film.sources.map((s, j) => (
-                <div key={j} style={{ color: 'var(--brand-error)', fontSize: 12, marginLeft: 24 }}>
+                <div key={j} style={{ color: 'var(--brand-error)', fontSize: 'var(--text-base)', marginLeft: 24 }}>
                   {s.source}: {s.status}
                   {s.message ? ` — ${s.message}` : ''}
                 </div>

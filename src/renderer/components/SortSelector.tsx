@@ -31,7 +31,7 @@ export const SortSelector: React.FC<Props> = ({ value, onChange }) => {
     <div style={{
       display: 'inline-flex',
       background: 'var(--bg-pill)',
-      borderRadius: 16,
+      borderRadius: 'var(--radius-2xl)',
       padding: 3,
       border: '1px solid var(--border-light)',
       flex: '0 0 auto',
@@ -53,14 +53,14 @@ export const SortSelector: React.FC<Props> = ({ value, onChange }) => {
             }
             style={{
               padding: '5px 11px',
-              borderRadius: 13,
+              borderRadius: 'var(--radius-md)',
               border: 'none',
               cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: 12,
-              background: active ? '#fff' : 'transparent',
-              color: active ? '#000' : '#999',
-              transition: 'background 0.15s, color 0.15s',
+              fontWeight: 'var(--weight-semibold)',
+              fontSize: 'var(--text-base)',
+              background: active ? 'var(--text-primary)' : 'transparent',
+              color: active ? 'var(--bg-primary)' : 'var(--text-muted)',
+              transition: 'var(--transition-normal)',
             }}
           >
             {t(LABELS[m])}

@@ -132,10 +132,9 @@ export const normalize = (s: string): string =>
     .replace(/[\u0300-\u036f]/g, '');
 
 /**
- * Normalize a movie title for deduplication — uses the systematic
- * title-cleaning rules from `titleRules/` to strip cinema-event
- * prefixes/suffixes (avant-première, soirée spéciale, extended, director's
- * cut, final cut, version longue, opera, live, etc.).
+ * Normalize a movie title for deduplication — uses the title-cleaning
+ * rules from `titleRules/` (same `shared/` layer) to strip cinema-event
+ * prefixes/suffixes.
  *
  * This ensures that:
  *   "En avant-première Heart Of The Beast" deduplicates with "Heart Of The Beast"

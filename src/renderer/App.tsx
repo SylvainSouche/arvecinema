@@ -347,7 +347,7 @@ export const App: React.FC = () => {
   }
   if (error) {
     return (
-      <div style={{ color: '#e50914', padding: 40, textAlign: 'center' }}>
+      <div style={{ color: 'var(--brand-error)', padding: 40, textAlign: 'center' }}>
         {t('error')}: {error}
       </div>
     );
@@ -386,19 +386,19 @@ export const App: React.FC = () => {
           height={36}
           style={{
             display: 'block',
-            borderRadius: 8,
+            borderRadius: 'var(--radius-lg)',
             flex: '0 0 auto',
             pointerEvents: 'none', // clicks pass through to the draggable header
           }}
         />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800 }}>
+          <h1 style={{ margin: 0, fontSize: 'var(--text-3xl)', fontWeight: 'var(--weight-extrabold)' }}>
             {t('appTitle')}{' '}
-            <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-faint)' }}>
+            <span style={{ fontSize: 'var(--text-base)', fontWeight: 'var(--weight-normal)', color: 'var(--text-faint)' }}>
               v{APP_VERSION}
             </span>
           </h1>
-          <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: 14 }}>
+          <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: 'var(--text-lg)' }}>
             {visibleCount} {visibleCount > 1 ? t('films') : t('film')} —{' '}
             {viewMode === 'day' && selectedDay !== null
               ? new Date(`${selectedDay}T12:00:00Z`).toLocaleDateString(
@@ -421,7 +421,7 @@ export const App: React.FC = () => {
             <span
               style={{
                 color: 'var(--text-dim)',
-                fontSize: 11,
+                fontSize: 'var(--text-sm)',
                 fontVariantNumeric: 'tabular-nums',
                 whiteSpace: 'nowrap',
               }}
@@ -462,7 +462,7 @@ export const App: React.FC = () => {
                   marginLeft: -9,
                   borderRadius: '50%',
                   border: '2px solid var(--border-light)',
-                  borderTopColor: '#4a9eff',
+                  borderTopColor: 'var(--brand-accent)',
                   animation: 'arve-spin 0.8s linear infinite',
                   boxSizing: 'border-box',
                 }}
@@ -495,8 +495,8 @@ export const App: React.FC = () => {
                 position: 'relative',
                 color:
                   retryState && !retryState.inProgress && retryState.recovered > 0
-                    ? '#10b981' // green — recovered some ratings
-                    : '#eab308', // yellow — attention needed / retry in progress
+                     ? 'var(--brand-success)' // green — recovered some ratings
+                    : 'var(--brand-warning)', // yellow — attention needed / retry in progress
                 borderColor:
                   retryState && !retryState.inProgress && retryState.recovered > 0
                     ? 'rgba(16, 185, 129, 0.4)'
@@ -518,21 +518,21 @@ export const App: React.FC = () => {
                     marginLeft: -7,
                     borderRadius: '50%',
                     border: '2px solid var(--border-light)',
-                    borderTopColor: '#eab308',
+                    borderTopColor: 'var(--brand-warning)',
                     animation: 'arve-spin 0.8s linear infinite',
                     boxSizing: 'border-box',
                   }}
                 />
               ) : (
                 <>
-                  <span aria-hidden style={{ fontSize: 14 }}>
+                  <span aria-hidden style={{ fontSize: 'var(--text-lg)' }}>
                     ⚠
                   </span>
                   <span
                     style={{
-                      fontSize: 10,
+                      fontSize: 'var(--text-xs)',
                       marginLeft: 4,
-                      fontWeight: 700,
+                      fontWeight: 'var(--weight-bold)',
                       fontVariantNumeric: 'tabular-nums',
                     }}
                   >

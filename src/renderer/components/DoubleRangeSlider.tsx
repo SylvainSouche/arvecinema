@@ -50,7 +50,7 @@ export const DoubleRangeSlider: React.FC<Props> = ({
           right: 0,
           height: 4,
           background: 'var(--bg-slider)',
-          borderRadius: 2,
+          borderRadius: 'var(--radius-sm)',
           transform: 'translateY(-50%)',
         }}
       />
@@ -63,7 +63,7 @@ export const DoubleRangeSlider: React.FC<Props> = ({
           width: `${maxPct - minPct}%`,
           height: 4,
           background: 'var(--text-primary)',
-          borderRadius: 2,
+          borderRadius: 'var(--radius-sm)',
           transform: 'translateY(-50%)',
         }}
       />

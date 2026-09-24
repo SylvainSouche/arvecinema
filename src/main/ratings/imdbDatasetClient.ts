@@ -13,7 +13,7 @@ import {
   clearAndBulkInsertImdbRatings,
   getImdbRatingsBatch as dbGetImdbRatingsBatch,
 } from './cacheDb';
-import { withNetworkTracking } from './networkActivity';
+import { withNetworkTracking } from '../../shared/networkActivity';
 import { log } from './moduleLoggers';
 
 // ──────────────────────────────────────────────────────────────────────────
