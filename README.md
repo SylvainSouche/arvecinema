@@ -42,8 +42,28 @@ Run `npm run help` at any time for a quick reference. Full details below.
 npm run dev          # dev mode (hot reload via Vite)
 npm run debug        # same + ARVE_DEBUG=1 (verbose logs, DevTools auto-open)
 npm run build        # production build to out/ (main + preload + renderer)
-npm run preview       # run the built app from out/ without rebuilding
+npm run preview      # run the built app from out/ without rebuilding
 ```
+
+### Native module rebuilds (better-sqlite3)
+
+`better-sqlite3` is compiled against a runtime ABI: Node 22 = ABI 127,
+Electron 33 = ABI 130. It can only match one at a time — tests and the app
+want opposite builds. Every high-level script (`dev`, `build`, `test`,
+`test:e2e`, `package*`) handles the correct rebuild itself; use these
+directly only when fixing a broken environment:
+
+```bash
+npm run rebuild:node     # recompile better-sqlite3 for the local Node ABI (vitest)
+npm run rebuild:electron # recompile for the Electron ABI (run app, e2e, packaging)
+```
+
+Symptoms of a mismatch: `ERR_DLOPEN_FAILED` / "compiled against a different
+Node.js version using NODE_MODULE_VERSION 127 … requires 130". If
+`npm run rebuild:electron` ever seems to "finish" without fixing it, force
+it with `npx electron-rebuild -f -w better-sqlite3` (older versions of this
+repo used `electron-builder install-app-deps`, which is silently a no-op on
+some machines).
 
 ### Code quality
 
@@ -53,22 +73,23 @@ npm run format        # format all source files with Prettier
 npm run format:check  # verify formatting without writing (used in CI)
 ```
 
-### Unit tests (vitest, ~2s, 262 tests)
+### Unit tests (vitest, ~2s, 266 tests)
 
 ```bash
-npm run test          # run all unit tests once
+npm run test          # run all unit tests once (rebuilds sqlite for Node first)
 npm run test:watch    # re-run tests on file change
 npm run test:coverage # run tests + generate coverage report
 ```
 
 Tests cover: date/time helpers, title normalization, title cleaning rules
 (FR + EN patterns), SQLite cache CRUD, i18n fallback chain, VF/VO detection,
-plugin registry + auto-discovery, AlloCiné HTML parser (with real fixture).
+plugin registry + auto-discovery (incl. the `testOnly` release filter),
+AlloCiné HTML parser (with real fixture).
 
-### E2E tests (Playwright + Electron, ~60s)
+### E2E tests (Playwright + Electron, ~30s)
 
 ```bash
-npm run test:e2e         # launch real Electron app, run 7 smoke tests
+npm run test:e2e         # build + rebuild, launch real Electron app, run 7 smoke tests
 npm run test:e2e:headed # same but show the app window (for debugging)
 ```
 
@@ -100,10 +121,14 @@ deterministic results, works offline.
 
 ### Packaging
 
+All `package*` targets rebuild `better-sqlite3` for the Electron ABI first
+(see "Native module rebuilds" above) — a packaged app launched with a
+Node-ABI sqlite binary crashes on startup with `ERR_DLOPEN_FAILED`.
+
 ```bash
-npm run package      # build + package for current platform (.dmg / .exe / AppImage)
-npm run package:dir  # build + unpacked directory (faster, for testing the packaged app)
-npm run package:dmg   # build + macOS .dmg only (arm64)
+npm run package      # rebuild + build + package for current platform (.dmg / .exe / AppImage)
+npm run package:dir  # same + unpacked directory (faster, for testing the packaged app)
+npm run package:dmg  # same + macOS .dmg only (arm64)
 ```
 
 ### Environment variables
@@ -151,7 +176,7 @@ src/
 │   │       ├── cluses.ts         Ciné de Cluses (Cluses)
 │   │       ├── bonneville.ts     Ciné Château (Bonneville)
 │   │       ├── chamonix.ts       Cinéma Vox (Chamonix)
-│   │       └── _exampleInstance.ts  Canary/template
+│   │       └── _exampleInstance.ts  Canary (`testOnly: true` — skipped from release builds)
 │   └── ratings/
 │       ├── ratingsEnricher.ts    Orchestrator (154 lines) — Phase 0 → 1a → 1b → 1.5 → 2
 │       ├── idResolver.ts         Wikidata ID resolution + cache management

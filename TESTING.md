@@ -10,7 +10,7 @@ ArveCinema has **6 test layers**, each catching different failure modes. No sing
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ Layer 1: Unit tests (vitest)                                           │
 │   Pure function correctness — date helpers, normalize, cacheDb CRUD   │
-│   200 tests, 1.6s                                                     │
+│   266 tests, ~2s                                                      │
 ├─────────────────────────────────────────────────────────────────────────┤
 │ Layer 2: Query snapshot tests (vitest)                                │
 │   SPARQL query strings + GraphQL hashes — catches accidental changes  │
@@ -26,7 +26,7 @@ ArveCinema has **6 test layers**, each catching different failure modes. No sing
 ├───────────────────────────────────────────────────────────────────────┤
 │ Layer 5: E2E smoke tests (Playwright + Electron)                     │
 │   Launch built app, verify UI renders, click buttons                 │
-│   6 tests, 59s — implemented                                         │
+│   7 tests, ~30s — implemented                                        │
 ├───────────────────────────────────────────────────────────────────────┤
 │ Layer 6: Live smoke tests (opt-in, manual)                           │
 │   Hit real endpoints (Wikidata, cinema sites) — catches schema drift │
@@ -62,8 +62,10 @@ ArveCinema has **6 test layers**, each catching different failure modes. No sing
 **Coverage:** Pure functions — date/time helpers, normalize, cacheDb CRUD, i18n, VF/VO detection, title coherence, plugin registry.
 **Catches:** Logic bugs in pure functions, regressions in date parsing, cache UPSERT behavior, title normalization edge cases.
 **Misses:** Network behavior, HTML parsing, IPC flows, UI rendering, query correctness.
-**Speed:** 1.6s (200 tests).
+**Speed:** ~2s (266 tests).
 **When to run:** Every PR (CI), every save (watch mode).
+Note: `npm run test` rebuilds better-sqlite3 for the **Node** ABI first —
+unit tests and Electron want opposite builds, see "Native module ABI" below.
 
 ### Layer 2: Query snapshot tests (planned)
 
@@ -98,11 +100,13 @@ ArveCinema has **6 test layers**, each catching different failure modes. No sing
 ### Layer 5: E2E smoke tests (implemented)
 
 **Files:** `test/e2e/smoke.e2e.ts`
-**Coverage:** App launches, UI renders, buttons work, about panel opens.
+**Coverage:** App launches, UI renders, buttons work, about panel opens,
+cinema selector shows the 4 real cinemas and NOT the `testOnly` canary.
 **Catches:** Build breakage, renderer crash, IPC handler missing, missing dependencies.
 **Misses:** Data correctness, network behavior, parser logic.
-**Speed:** 59s (6 tests, each launches a fresh Electron).
-**When to run:** Every PR (CI), or manually via `npm run test:e2e`.
+**Speed:** ~30s (7 tests, each launches a fresh Electron).
+**When to run:** Every PR (CI), or manually via `npm run test:e2e`
+(auto-rebuilds + recompiles better-sqlite3 for Electron before running).
 
 ### Layer 6: Live smoke tests (planned — opt-in)
 
@@ -144,3 +148,31 @@ Every failure mode should produce **actionable user feedback** with:
 4. **What to include in a bug report** — timestamp, error message, cinema name
 
 See `ERROR_HANDLING.md` for the current error feedback implementation + planned improvements.
+
+## Troubleshooting: native module ABI (better-sqlite3)
+
+`better-sqlite3` is a compiled binary locked to one runtime ABI:
+Node 22 = `NODE_MODULE_VERSION 127`, Electron 33 = `130`. Tests and the app
+want opposite builds, so the ABI alternates as you switch contexts.
+
+| Command                     | ABI it leaves behind         |
+| --------------------------- | ---------------------------- |
+| `npm run test` / `watch`    | Node (rebuilds internally)   |
+| `npm run dev` / `build`     | Electron (rebuilds first)    |
+| `npm run test:e2e`          | Electron (builds first)      |
+| `npm run package*`          | Electron (rebuilds first)    |
+
+Symptom: `ERR_DLOPEN_FAILED` / "compiled against a different Node.js
+version using NODE_MODULE_VERSION 127 … requires 130" at app startup, or
+`schedule:fetch` IPC failing in e2e with no UI rendering.
+
+Fix: run the relevant entry script (it rebuilds itself), or explicitly:
+
+```bash
+npm run rebuild:node     # before/after using vitest bare
+npm run rebuild:electron # before running/packaging the app
+npx electron-rebuild -f -w better-sqlite3   # if the above seems to no-op
+```
+
+Avoid running `npx vitest` or `npx electron` directly after the *other*
+context — that's the #1 source of this error.
