@@ -39,6 +39,7 @@
     "rebuild:node": "npm rebuild better-sqlite3 --quiet",
     "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
     "test:e2e": "npm run build && bash scripts/run-e2e.sh",
+    "test:e2e:replay": "ARVE_REPLAY=test/fixtures/network-capture.json npm run test:e2e",
     "test:e2e:headed": "npm run build && bash scripts/run-e2e.sh --headed",
     "record": "bash scripts/capture-network.sh",
     "replay": "ARVE_REPLAY=test/fixtures/network-capture.json bash scripts/run-e2e.sh",

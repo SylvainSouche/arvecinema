@@ -3,16 +3,22 @@
 ## Unreleased
 
 ### Features
-- **Runtime custom cinemas (`custom-cinemas.json`)** — new architecture feature: users can add/remove cinema instances at runtime via a JSON file in userData (loaded at startup, re-loadable through the new `cinemas:reload-custom` IPC). Entries are validated through the exact same shape checks + plugin `validateConfig` as bundled instances. Safety properties: JSON-only (no code execution in packaged builds), custom ids cannot hijack builtin ids, malformed files never wipe the previous custom set, the file mirrors the custom registry. 17 unit tests + 2 e2e tests launch the built app with a seeded file and assert the custom cinema pill renders.
+- **Runtime custom cinemas (`custom-cinemas.json`)** — new architecture feature: users can add/remove cinema instances at runtime via a JSON file in userData (loaded at startup). Entries are validated through the exact same shape checks + plugin `validateConfig` as bundled instances. Safety properties: JSON-only (no code execution in packaged builds), custom ids cannot hijack builtin ids, malformed files never wipe the previous custom set, the file mirrors the custom registry.
+- **Custom cinemas settings UI (Phase 2)** — About panel → 🎬 Cinemas tab. Add/edit/remove custom cinemas with name, city, color, adapter kind (from `cinemas:plugin-kinds`) and per-kind config fields; Save → `cinemas:save-custom` IPC writes the file + re-registers; the registry change event (`cinemas:changed`) refreshes the cinema list + schedule live, no restart. Main-side rejections (builtin-id collisions, invalid config) surface per-row; client-side validation catches duplicate/missing required fields before saving. Form state loads via `cinemas:read-custom`.
+- **Replay-based E2E in CI** — new `e2e-replay` GitHub Actions job runs the full Playwright suite against the recorded network fixture `test/fixtures/network-capture.json` (80 responses; schedules + AlloCiné/RT rating pages). `npm run test:e2e:replay` locally (17s vs 47s live). Recorded headlessly via `node scripts/record-replay-fixture.cjs` (launches the built app, waits through the enrichment cycle, quits through the real shutdown path). Bodies > 512 KB (IMDB dataset, large Wikidata batches) are skipped at record time and fall through to the real network on replay (partial replay by design).
 
 ### Fixes
 - **Canary cinema hidden from releases** — the "Example Cinema (Canary)" instance was registered in every build, including packaged apps. A new `CinemaInstance.testOnly` flag makes the registry keep canary/template instances in dev + unit tests but skip them from bundled builds (`import.meta.env.DEV` baked to `false` at build time). Covered by unit tests (inclusion + exclusion modes) and an e2e assertion that the canary pill is absent from the built app.
 - **better-sqlite3 ABI script fixes** — `rebuild:electron` previously used `electron-builder install-app-deps`, which could silently succeed without recompiling, leaving the module on the wrong ABI (`NODE_MODULE_VERSION 127` vs Electron's `130`) and crashing `schedule:fetch` at app startup. It now uses `electron-rebuild -f -w better-sqlite3`, and `package*`/`build`/`test:e2e` scripts rebuild for the correct ABI themselves. Troubleshooting table in `TESTING.md` + `README.md`.
 - **`clean` / `clean:full` no longer wipe uncommitted changes** — the `git reset --hard` was removed from both scripts (the project's documented intent: remove untracked artifacts only).
+- **Shutdown coordinator fully offline (dead code resurrected)** — `doShutdown` had regressed to a bare `SIGKILL` of its own process, silently skipping the SQLite close, log flush and — critically — the fixture save; `gracefulShutdown()` was never called. Worse, its step functions used runtime `require()`s with wrong relative paths that NEVER resolve in the built single-file bundle (`out/main`), so SQLite close/log-flush/fixture-save were silently skipped even when invoked. All steps are static imports now; the recorder logs `[network-recorder] saved N recorded responses` again.
+- **Strict IMDB tconst validation** — the dataset parser accepted any `tt…` string (e.g. `tt0000001-RANK`); now `/^tt\d+$/` only. Found by the new parsing tests.
 
 ### Internal
 - `test:e2e` now runs `npm run build` itself (was a silent prerequisite).
-- Unit test count: 266 (+4 for the `testOnly` release-filter behavior).
+- `test:e2e:replay` script added (was referenced in old changelog entries and docs but missing from package.json).
+- Unit test count: 307 (+24: IMDB dataset parsing 15, custom-cinemas IPC file I/O 9); e2e count 11 with the 2 new settings-UI flow tests.
+- Preload API additions: `readCustomCinemas`, `saveCustomCinemas`, `listPluginKinds`, `reloadCustomCinemas`, `onCinemasChanged`.
 
 ## v0.13.0 (2026-09-21)
 

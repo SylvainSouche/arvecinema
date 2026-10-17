@@ -1,4 +1,12 @@
 import { BrowserWindow } from 'electron';
+// Static imports (NOT require()) — the built bundle is a single CJS file,
+// and a runtime require('../shared/…') resolves relative to the bundle's
+// own directory (out/shared) where no module exists: every require inside
+// gracefulShutdown's try/catch would throw MODULE_NOT_FOUND and be
+// silently swallowed (DB never closed, logs never flushed, no fixture).
+import { closeCacheDb } from './cacheDb';
+import { flushLogs } from './logger';
+import { saveRecordedFixture } from '../../shared/networkRecorder';
 
 // ──────────────────────────────────────────────────────────────────────────
 // Shutdown coordinator — ensures all background work is stopped and all
@@ -51,22 +59,16 @@ export function gracefulShutdown(): void {
 
   // Step 3: close the SQLite DB connection (synchronous — better-sqlite3).
   try {
-    // Use require() not import() — these modules are already loaded,
-    // and require() is synchronous so we don't risk hanging on a
-    // never-resolving promise.
-    const { closeCacheDb } = require('./cacheDb');
     closeCacheDb();
   } catch { /* DB not open or already closed */ }
 
   // Step 4: flush log dispatchers (synchronous).
   try {
-    const { flushLogs } = require('./logger');
     flushLogs();
   } catch { /* logger not initialized */ }
 
   // Step 5: save recorded network fixture (if ARVE_RECORD was set).
   try {
-    const { saveRecordedFixture } = require('../shared/networkRecorder');
     saveRecordedFixture();
   } catch { /* recorder not loaded */ }
 

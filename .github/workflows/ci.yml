@@ -2,7 +2,9 @@
 #
 # Jobs:
 #   1. lint-and-test - typecheck + vitest unit tests + smoke tests
-#   2. build         - electron-vite build (verifies the app compiles)
+#   2. e2e-replay    - Playwright E2E against the recorded network fixture
+#                      (no live cinema-site traffic for recorded URLs)
+#   3. build         - electron-vite build (verifies the app compiles)
 
 name: CI
 
@@ -45,6 +47,43 @@ jobs:
 
       - name: Run logger smoke test
         run: node scripts/smoke-test-logger.mjs
+
+  e2e-replay:
+    name: E2E (replay fixture)
+    runs-on: ubuntu-22.04
+    needs: lint-and-test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      # The app needs better-sqlite3 compiled for Electron's ABI (not Node's).
+      # See TESTING.md → troubleshooting.
+      - name: Rebuild native module (Electron ABI)
+        run: npx electron-rebuild -f -w better-sqlite3
+
+      # Shared libraries the Electron binary needs on a bare runner.
+      - name: Install Electron system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-0 libnotify4 libnss3 libxss1 \
+            libasound2 libxtst6 libgbm1 xdg-utils
+
+      # Fixture: test/fixtures/network-capture.json (re-record with
+      # `npm run record` when cinema sites change their markup). Oversized
+      # bodies (>512 KB: IMDB dataset, big Wikidata batches) fall through
+      # to the real network — recorded are the schedules + rating pages.
+      - name: Run E2E with replay fixture
+        run: npm run test:e2e:replay
 
   build:
     name: Build (electron-vite)

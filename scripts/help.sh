@@ -26,17 +26,24 @@ UNIT TESTS (vitest, ~2s, 283 tests)
   npm run test:watch       Re-run tests on file change
   npm run test:coverage    Run tests + coverage report
 
-E2E TESTS (Playwright + Electron, ~30s)
+E2E TESTS (Playwright + Electron)
   npm run test:e2e         Rebuild for Electron, compile out/, launch real app,
-                           run smoke tests
+                           run 11 tests (live network for unrecorded URLs)
+  npm run test:e2e:replay  Same suite against the recorded network fixture
+                           (~18s, deterministic for recorded URLs)
   npm run test:e2e:headed  Same but show the app window
 
 NETWORK RECORD/REPLAY
-  npm run record           Launch app, capture all HTTP traffic to
-                           test/fixtures/network-capture.json
+  npm run record           Launch app interactively, capture all HTTP traffic
+                           to test/fixtures/network-capture.json
                            (close the app to save the fixture)
+  node scripts/record-replay-fixture.cjs
+                           Headless variant: launches the BUILT app, waits
+                           through the enrichment cycle, quits via the real
+                           shutdown path → fixture saved automatically
   npm run replay           Run E2E tests using the recorded fixture
-                           (no network needed, fully deterministic)
+                           (deterministic for recorded URLs; bodies > 512 KB
+                           fall through to the real network)
 
 PACKAGING
   npm run package          Build + package for current platform

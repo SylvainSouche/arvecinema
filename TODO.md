@@ -9,7 +9,7 @@
 - [x] Document the adapter contract — see `src/main/cinemas/adapters/README.md` + JSDoc
 - [x] TRUE drop-in: both adapter types AND cinema instances auto-discovered. Drop a `.ts` file in `adapters/` or `instances/` — no edit to any other file.
 - [x] **`testOnly` flag for canary/template instances** — `registry.ts` registers them in dev + unit tests but skips them from bundled release builds (`import.meta.env.DEV`), so "Example Cinema (Canary)" never reaches end users. Covered by unit tests (both modes) + an e2e absence assertion.
-- [ ] Support runtime cinema configuration **via a settings UI** — Phase 1 landed: `userData/custom-cinemas.json` (JSON-only, validated through the same plugin pipeline, reload IPC `cinemas:reload-custom`, corruption-safe). Remaining: a UI that reads/writes the file
+- [x] **Runtime cinema configuration with settings UI** — Phase 1: `userData/custom-cinemas.json` (JSON-only, validated through the same plugin pipeline, corruption-safe). Phase 2: About panel → 🎬 Cinemas tab (`CustomCinemasEditor`) — add/edit/remove rows, per-kind required fields, save → `cinemas:save-custom` IPC writes + re-registers, `cinemas:changed` event refreshes the cinema list live, main-side rejections surfaced per row. Backed by `customCinemasIpc.ts` (electron-free, 9 unit tests) + 2 UI-flow e2e tests.
 
 ### Ratings pipeline modularization
 
@@ -54,7 +54,7 @@
 
 ### Testing
 
-- [x] **Unit tests** (vitest, 283 tests, ~2s):
+- [x] **Unit tests** (vitest, 307 tests, ~2s):
   - [x] Date/time helpers — 50 tests
   - [x] Title normalization + coherence checking — 34 tests
   - [x] Title cleaning rules (FR + EN patterns) — 50 tests
@@ -64,15 +64,18 @@
   - [x] AlloCiné HTML parser (with real fixture) — 12 tests
   - [x] Plugin registry + auto-discovery canaries + `testOnly` release filter — 52 tests
   - [x] Runtime custom registry (custom-cinemas.json) — 17 tests
-  - [ ] IMDB dataset parsing (TSV → SQLite) — not yet
-- [x] **E2E smoke tests** (Playwright + Electron, 7 tests, ~30s):
+  - [x] **IMDB dataset parsing (TSV → SQLite)** — 15 tests: `parseLine` row validator (header, `\N`, malformed ids/ratings, range checks), zlib streaming split across chunk boundaries (5000-row fixture), full TSV → `clearAndBulkInsertImdbRatings` → `getImdbRatingsBatch` pipeline + replace-on-refresh + poisoning guard. Found + fixed a lax id check (`tt\d+` regex now strict).
+  - [x] Custom-cinemas IPC file I/O (`readCustomCinemasFile` / `saveCustomCinemas`) — 9 tests: missing/malformed/wrong-shape file, write + re-register, invalid entries reported per-row, remove-all, non-array rejected WITHOUT writing, file persistence across a simulated restart
+- [x] **E2E smoke tests** (Playwright + Electron, 11 tests):
   - [x] App launch, header, cinema selector (incl. canary ABSENT from bundled app), filter bar, view toggle, about panel, diagnostics panel
-- [x] **CI workflow** — GitHub Actions: typecheck + 283 unit tests + smoke checks + build on every PR/push
+  - [x] Custom cinemas: file-based registration + invalid-entry isolation + **settings UI flow** (add via form → save → live registry refresh) + form validation error state
+- [x] **Replay-based E2E in CI** — `test/fixtures/network-capture.json` (80 responses, 3.3 MB) recorded headlessly with `node scripts/record-replay-fixture.cjs`. `npm run test:e2e:replay` runs the full e2e suite against the fixture (17s vs 47s live, no live cinema-site traffic for recorded URLs). Bodies > 512 KB (IMDB dataset, big Wikidata batches) fall through to the real network via partial replay. CI job `e2e-replay` runs it on every push/PR.
+- [x] **Shutdown coordinator restored** — `doShutdown` had regressed to a bare `SIGKILL`, silently skipping DB close, log flush AND the fixture save; `gracefulShutdown()` was dead code + its `require()`s could never resolve in the built bundle (wrong relative paths, invisible to typecheck). Now static imports: `[network-recorder] saved 84 recorded responses` actually runs again.
+- [x] **CI workflow** — GitHub Actions: typecheck + 307 unit tests + smoke checks + replay e2e + build on every PR/push
 - [x] **TESTING.md** — comprehensive testing strategy mapping 15 failure modes to 6 test layers
 - [x] **ERROR_HANDLING.md** — documents the user-feedback loop + error categories
 - [x] **Coverage headers** — every test file has a header explaining what it catches/misses
-- [ ] Functional/integration tests (full enrichment pipeline, cache hit/miss, schema migration, retry button flow)
-- [ ] HAR replay tests (Phase 2 — needs fixture from `npm run record`)
+- [ ] Functional/integration tests (full enrichment pipeline with replayed Wikidata — cache hit/miss, schema migration, retry button flow)
 - [ ] Snapshot tests for UI regression (MovieCard layout, WeekGrid, LogViewer)
 
 ### Error handling
@@ -94,9 +97,9 @@
 
 ## Infrastructure
 
-- [x] **Network recorder/replayer** — `npm run record` captures ALL HTTP traffic (fetchWithTimeout + browserFetch) to JSON fixture. `npm run replay` runs E2E tests using the fixture (no network needed).
+- [x] **Network recorder/replayer** — `npm run record` (interactive) or `node scripts/record-replay-fixture.cjs` (headless, auto-quits after the enrichment cycle) captures ALL HTTP traffic (fetchWithTimeout + browserFetch) to `test/fixtures/network-capture.json`. `npm run run replay` / `test:e2e:replay` runs the e2e suite using the fixture. Bodies > 512 KB are skipped at record time (partial replay fallback).
 - [x] **`npm run help`** — lists all commands with descriptions
-- [x] **GitHub Actions CI** — `.github/workflows/ci.yml`
+- [x] **GitHub Actions CI** — `.github/workflows/ci.yml`: typecheck + unit tests + smoke checks, **replay-based E2E job** (ubuntu runner, Xvfb, electron-rebuild), and the production build
 - [x] **better-sqlite3 ABI script fixes** — the Node ABI and the Electron ABI are incompatible; `rebuild:electron` now uses `electron-rebuild -f -w better-sqlite3` (the old `electron-builder install-app-deps` was silently a no-op), and `package*` / `build` / `test:e2e` scripts self-rebuild for the right ABI. Table + symptoms in `TESTING.md` + `README.md`.
 - [x] **Safe clean scripts** — `clean` / `clean:full` no longer run `git reset --hard`, so uncommitted changes survive cleanup.
 

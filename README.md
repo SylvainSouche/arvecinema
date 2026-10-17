@@ -73,7 +73,7 @@ npm run format        # format all source files with Prettier
 npm run format:check  # verify formatting without writing (used in CI)
 ```
 
-### Unit tests (vitest, ~2s, 283 tests)
+### Unit tests (vitest, ~2s, 307 tests)
 
 ```bash
 npm run test          # run all unit tests once (rebuilds sqlite for Node first)
@@ -84,18 +84,21 @@ npm run test:coverage # run tests + generate coverage report
 Tests cover: date/time helpers, title normalization, title cleaning rules
 (FR + EN patterns), SQLite cache CRUD, i18n fallback chain, VF/VO detection,
 plugin registry + auto-discovery (incl. the `testOnly` release filter),
-runtime custom registry (userData/custom-cinemas.json), AlloCiné HTML parser
-(with real fixture).
+runtime custom registry (userData/custom-cinemas.json) + its IPC file I/O,
+IMDB dataset TSV parsing (row validator + gzip streaming + TSV→SQLite
+pipeline), AlloCiné HTML parser (with real fixture).
 
-### E2E tests (Playwright + Electron, ~30s)
+### E2E tests (Playwright + Electron, ~20s replayed / ~47s live)
 
 ```bash
-npm run test:e2e         # build + rebuild, launch real Electron app, run 7 smoke tests
-npm run test:e2e:headed # same but show the app window (for debugging)
+npm run test:e2e         # build + rebuild, launch real Electron app, run 11 tests
+npm run test:e2e:replay  # same suite, replayed network fixture (deterministic)
+npm run test:e2e:headed  # same but show the app window (for debugging)
 ```
 
 Tests cover: app launch, header rendering, cinema selector, filter bar,
-view toggle, about panel, diagnostics panel.
+view toggle, about panel + custom-cinemas settings UI, diagnostics panel,
+custom cinema file registration + invalid-entry isolation.
 
 On Linux, `scripts/run-e2e.sh` auto-starts Xvfb if no display is detected.
 On macOS/Windows, the native display is used.
@@ -103,12 +106,15 @@ On macOS/Windows, the native display is used.
 ### Network record/replay
 
 ```bash
-npm run record   # launch app, capture ALL HTTP traffic to
+npm run record   # launch app interactively (close it to save the fixture)
                  # test/fixtures/network-capture.json
-                 # (close the app to save the fixture)
 
-npm run replay   # run E2E tests using the recorded fixture
-                 # (no network needed, fully deterministic)
+node scripts/record-replay-fixture.cjs   # headless: launches the BUILT app,
+                                         # waits through the enrichment cycle,
+                                         # quits via the shutdown path → fixture
+                                         # saved automatically
+
+npm run test:e2e:replay # run the e2e suite using the recorded fixture
 ```
 
 The recorder intercepts **both** network paths:
@@ -117,8 +123,11 @@ The recorder intercepts **both** network paths:
 - `browserFetch` (hidden BrowserWindow — AlloCiné, cinevox, Cloudflare bypass)
 
 The fixture is a simple JSON map: `"GET:https://url" → {status, body}`.
-On replay, every fetch returns the recorded response — zero network calls,
-deterministic results, works offline.
+On replay, every fetch returns the recorded response — recorded URLs are
+deterministic. Bodies > 512 KB (e.g. the 8 MB IMDB dataset) are skipped at
+record time and fall through to the real network on replay (partial replay,
+by design — keeps the fixture at ~3 MB). Re-record when a cinema site
+changes its markup so heavily that its replayed pages no longer work.
 
 ### Packaging
 

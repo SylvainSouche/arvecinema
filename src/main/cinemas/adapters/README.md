@@ -223,7 +223,8 @@ with no repackage/rebuild required:
 | | |
 |---|---|
 | File location | `userData/custom-cinemas.json` (same dir as `cache.db`; use "Open logs" in the About panel to find it) |
-| Loaded | at startup, and via the `cinemas:reload-custom` IPC (for a future settings UI) |
+| Loaded | at startup, via the `cinemas:reload-custom` IPC, and via `cinemas:save-custom` (settings UI) |
+| Edited via | About panel → 🎬 **Cinemas** tab (`CustomCinemasEditor`) or manual JSON editing + reload |
 | Allowed content | **JSON only** — no code execution, so it's safe for packaged builds; adapter `kind` must reference an already-bundled plugin |
 
 Schema — same shape as bundled instances:
@@ -256,9 +257,22 @@ Semantics:
   rejected — users cannot hijack builtin cinemas. Duplicate ids within the
   file register only the first occurrence.
 
-Unit tests: `test/main/cinemas/customRegistry.test.ts` (17 cases). E2E:
-`test/e2e/custom-cinema.e2e.ts`. Still future: a settings UI reading/writing
-this file instead of manual editing.
+Unit tests: `test/main/cinemas/customRegistry.test.ts` (17 cases) +
+`test/main/cinemas/customCinemasIpc.test.ts` (9 file-I/O cases). E2E:
+`test/e2e/custom-cinema.e2e.ts` (file registration, invalid-entry isolation,
+and the settings-UI add→save→live-refresh flow).
+
+### Custom-cinemas IPC surface
+
+| Channel | Purpose |
+|---|---|
+| `cinemas:read-custom` | Raw file entries for the editor form (missing/malformed → clean empty state) |
+| `cinemas:save-custom` | Write the editor's list + re-register; returns `{ written, reload: { registered, errors } }`; fires `cinemas:changed` to every renderer |
+| `cinemas:plugin-kinds` | Registered adapter kinds (id/displayName) for the form's kind select |
+| `cinemas:reload-custom` | Re-read the file from disk + re-register (manual JSON editing power flow) |
+
+Implementation: `customCinemasIpc.ts` (electron-free file I/O + registration,
+unit-tested) with thin `ipcMain.handle` wrappers in `main/index.ts`.
 
 ## Testing
 

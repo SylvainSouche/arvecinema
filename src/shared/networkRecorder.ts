@@ -84,7 +84,13 @@ function getReplayStore(): FixtureMap | null {
 
 /** Save the recorded fixture to disk (called on app shutdown). */
 export function saveRecordedFixture(): void {
-  if (!RECORD_PATH || recordStore.size === 0) return;
+  if (!RECORD_PATH) return; // not in record mode
+  if (recordStore.size === 0) {
+    log.warn(
+      '[network-recorder] session recorded 0 responses — fixture not written. Was the network idle, or is ARVE_RECORD pointing at the right app?',
+    );
+    return;
+  }
 
   // Resolve relative to project root
   const outPath = path.resolve(process.cwd(), RECORD_PATH);
@@ -117,6 +123,13 @@ function makeKey(method: string, url: string): string {
 
 // ── Record wrapper ──────────────────────────────────────────────────────────
 
+/** Bodies larger than this are NOT recorded: they bloat the fixture file
+ *  (the IMDB dataset alone is 8 MB) with data the e2e suite doesn't need.
+ *  On replay, un-recorded URLs fall through to the real network via the
+ *  partial-replay path in fetchWithTimeout — schedule/ratings pages are
+ *  small and always replayed; only giant blob downloads de-grade to live. */
+const MAX_RECORDED_BODY_BYTES = 512 * 1024;
+
 /** Record a response. Called after the real fetch/browserFetch completes. */
 export function recordResponse(
   method: string,
@@ -126,6 +139,12 @@ export function recordResponse(
   headers?: Record<string, string>,
 ): void {
   if (!RECORD_PATH) return;
+  if (Buffer.byteLength(body, 'utf-8') > MAX_RECORDED_BODY_BYTES) {
+    log.warn(
+      `[network-recorder] body too large to record (${(Buffer.byteLength(body, 'utf-8') / 1024 / 1024).toFixed(1)} MB): ${method} ${url}`,
+    );
+    return;
+  }
   const key = makeKey(method, url);
   recordStore.set(key, {
     status,
