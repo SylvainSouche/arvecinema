@@ -3,12 +3,18 @@ import './tz'; // MUST be first — sets process.env.TZ before any Date construc
 import { app, BrowserWindow, ipcMain, nativeImage, shell, Menu, screen } from 'electron';
 import path from 'path';
 
-import { CINEMAS, CINEMA_INFOS } from './cinemas/registry';
+import { CINEMAS, getCinemaInfos, loadCustomCinemas } from './cinemas/registry';
 import type { Movie, ScheduleResponse, CinemaStatus } from './cinemas/types';
 import { enrichWithRatings } from './ratings/ratingsEnricher';
 import { getNetworkActive } from '../shared/networkActivity';
 import { initLogging, getAllLogs, clearLogs } from './ratings/logger';
 import { log } from './ratings/moduleLoggers';
+
+/** Path of the user-editable custom cinema registry (in userData, next to
+ *  cache.db). Loaded at startup; re-loadable via `cinemas:reload-custom`. */
+function customCinemasFile(): string {
+  return path.join(app.getPath('userData'), 'custom-cinemas.json');
+}
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -29,7 +35,15 @@ const ALLOWED_PROTOCOLS = new Set(['https:']);
 
 // ── IPC: list available cinemas (metadata only — no adapter function leak) ──
 
-ipcMain.handle('cinemas:list', () => CINEMA_INFOS);
+ipcMain.handle('cinemas:list', () => getCinemaInfos());
+
+// ── IPC: re-read the userData custom-cinemas.json and re-register ──────────
+//
+// Lets power users (and a future settings UI) add/remove cinemas without
+// restarting the app. Returns the same structured result the startup load
+// produces — { registered, errors } — so the caller can surface rejections.
+
+ipcMain.handle('cinemas:reload-custom', () => loadCustomCinemas(customCinemasFile()));
 
 // ── IPC: fetch schedule for a subset of cinemas (default: all) ──────────────
 //
@@ -561,6 +575,12 @@ function isSameRegistrableDomain(referenceUrl: string, url: string): boolean {
 
 app.whenReady().then(() => {
   initLogging(process.env.ARVE_DEBUG === '1');
+
+  // Register user-authored custom cinemas (userData/custom-cinemas.json)
+  // before any window exists — the renderer's first cinemas:list call then
+  // already includes them. Never throws; failures are logged.
+  loadCustomCinemas(customCinemasFile());
+
   createWindow();
 });
 

@@ -10,7 +10,7 @@ ArveCinema has **6 test layers**, each catching different failure modes. No sing
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ Layer 1: Unit tests (vitest)                                           │
 │   Pure function correctness — date helpers, normalize, cacheDb CRUD   │
-│   266 tests, ~2s                                                      │
+│   283 tests, ~2s                                                      │
 ├─────────────────────────────────────────────────────────────────────────┤
 │ Layer 2: Query snapshot tests (vitest)                                │
 │   SPARQL query strings + GraphQL hashes — catches accidental changes  │
@@ -62,7 +62,7 @@ ArveCinema has **6 test layers**, each catching different failure modes. No sing
 **Coverage:** Pure functions — date/time helpers, normalize, cacheDb CRUD, i18n, VF/VO detection, title coherence, plugin registry.
 **Catches:** Logic bugs in pure functions, regressions in date parsing, cache UPSERT behavior, title normalization edge cases.
 **Misses:** Network behavior, HTML parsing, IPC flows, UI rendering, query correctness.
-**Speed:** ~2s (266 tests).
+**Speed:** ~2s (283 tests).
 **When to run:** Every PR (CI), every save (watch mode).
 Note: `npm run test` rebuilds better-sqlite3 for the **Node** ABI first —
 unit tests and Electron want opposite builds, see "Native module ABI" below.

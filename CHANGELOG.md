@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Features
+- **Runtime custom cinemas (`custom-cinemas.json`)** — new architecture feature: users can add/remove cinema instances at runtime via a JSON file in userData (loaded at startup, re-loadable through the new `cinemas:reload-custom` IPC). Entries are validated through the exact same shape checks + plugin `validateConfig` as bundled instances. Safety properties: JSON-only (no code execution in packaged builds), custom ids cannot hijack builtin ids, malformed files never wipe the previous custom set, the file mirrors the custom registry. 17 unit tests + 2 e2e tests launch the built app with a seeded file and assert the custom cinema pill renders.
+
 ### Fixes
 - **Canary cinema hidden from releases** — the "Example Cinema (Canary)" instance was registered in every build, including packaged apps. A new `CinemaInstance.testOnly` flag makes the registry keep canary/template instances in dev + unit tests but skip them from bundled builds (`import.meta.env.DEV` baked to `false` at build time). Covered by unit tests (inclusion + exclusion modes) and an e2e assertion that the canary pill is absent from the built app.
 - **better-sqlite3 ABI script fixes** — `rebuild:electron` previously used `electron-builder install-app-deps`, which could silently succeed without recompiling, leaving the module on the wrong ABI (`NODE_MODULE_VERSION 127` vs Electron's `130`) and crashing `schedule:fetch` at app startup. It now uses `electron-rebuild -f -w better-sqlite3`, and `package*`/`build`/`test:e2e` scripts rebuild for the correct ABI themselves. Troubleshooting table in `TESTING.md` + `README.md`.

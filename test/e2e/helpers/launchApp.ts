@@ -46,15 +46,18 @@ function createTempUserDataDir(): string {
 
 /** Launch the Electron app with an isolated userData directory.
  *
- *  @param options Optional overrides (e.g. env vars for testing).
- *                 Set `options.replayFixture` to a fixture file path to
- *                 replay recorded network responses instead of hitting
- *                 real servers.
+ *  @param options Optional overrides for testing:
+ *   - `options.customCinemas`: array written to
+ *     `userData/custom-cinemas.json` BEFORE the app starts, so the runtime
+ *     custom registry (registering at startup) picks them up.
+ *   - `options.replayFixture`: fixture file path to replay recorded network
+ *     responses instead of hitting real servers.
  *  @returns LaunchedApp with the ElectronApplication, first Page, and cleanup. */
 export async function launchApp(
   options: {
     env?: Record<string, string>;
     replayFixture?: string;
+    customCinemas?: unknown[];
   } = {},
 ): Promise<LaunchedApp> {
   const entryPath = mainEntryPath();
@@ -63,6 +66,12 @@ export async function launchApp(
   }
 
   const userDataDir = createTempUserDataDir();
+  if (options.customCinemas) {
+    fs.writeFileSync(
+      path.join(userDataDir, 'custom-cinemas.json'),
+      JSON.stringify({ cinemas: options.customCinemas }),
+    );
+  }
 
   const electronApp = await electron.launch({
     // args: [mainEntryPath, --user-data-dir=...] — the first arg is the

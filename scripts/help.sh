@@ -21,7 +21,7 @@ CODE QUALITY
   npm run format           Format all source files with Prettier
   npm run format:check     Verify formatting without writing
 
-UNIT TESTS (vitest, ~2s, 266 tests)
+UNIT TESTS (vitest, ~2s, 283 tests)
   npm run test             Run all unit tests once (rebuilds sqlite for Node first)
   npm run test:watch       Re-run tests on file change
   npm run test:coverage    Run tests + coverage report

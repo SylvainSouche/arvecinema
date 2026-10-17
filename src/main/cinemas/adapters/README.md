@@ -214,6 +214,52 @@ The `plugin.ts` module exports helpers for plugin authors:
 | `chamonix`       | `instances/chamonix.ts`         | Chamonix                          |
 | `example-cinema` | `instances/_exampleInstance.ts` | Nowhere (canary — `testOnly` true, excluded from release builds) |
 
+## Runtime custom instances (`custom-cinemas.json`)
+
+Beyond bundled `.ts` instances, the registry can register **runtime**
+cinemas from a JSON file the user controls — works in the packaged app
+with no repackage/rebuild required:
+
+| | |
+|---|---|
+| File location | `userData/custom-cinemas.json` (same dir as `cache.db`; use "Open logs" in the About panel to find it) |
+| Loaded | at startup, and via the `cinemas:reload-custom` IPC (for a future settings UI) |
+| Allowed content | **JSON only** — no code execution, so it's safe for packaged builds; adapter `kind` must reference an already-bundled plugin |
+
+Schema — same shape as bundled instances:
+
+```json
+{
+  "cinemas": [
+    {
+      "id": "megève",
+      "name": "Cinéma Megève",
+      "city": "Megève",
+      "color": "#f59e0b",
+      "adapter": { "kind": "boxofficeapi", "baseUrl": "https://www.cinema-megeve.fr", "theaterId": "P9999" }
+    }
+  ]
+}
+```
+
+Semantics:
+
+- **The file mirrors the custom registry**: a reload replaces the entire
+  custom set with the file's valid entries — removing an entry removes the
+  cinema on the next load/startup.
+- **Corruption guard**: a missing, malformed-JSON or wrong-shape file keeps
+  the previous custom set intact and starts clean (never wipes).
+- **Validation parity**: entries pass the same shape checks + plugin
+  `validateConfig` as bundled instances. Invalid entries are skipped and
+  reported (logs + structured errors); valid entries still register.
+- **Namespace protection**: a custom id colliding with a bundled id is
+  rejected — users cannot hijack builtin cinemas. Duplicate ids within the
+  file register only the first occurrence.
+
+Unit tests: `test/main/cinemas/customRegistry.test.ts` (17 cases). E2E:
+`test/e2e/custom-cinema.e2e.ts`. Still future: a settings UI reading/writing
+this file instead of manual editing.
+
 ## Testing
 
 Plugin unit tests can mock `browserFetch` / `fetchWithTimeout` to feed in

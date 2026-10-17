@@ -9,7 +9,7 @@
 - [x] Document the adapter contract — see `src/main/cinemas/adapters/README.md` + JSDoc
 - [x] TRUE drop-in: both adapter types AND cinema instances auto-discovered. Drop a `.ts` file in `adapters/` or `instances/` — no edit to any other file.
 - [x] **`testOnly` flag for canary/template instances** — `registry.ts` registers them in dev + unit tests but skips them from bundled release builds (`import.meta.env.DEV`), so "Example Cinema (Canary)" never reaches end users. Covered by unit tests (both modes) + an e2e absence assertion.
-- [ ] Support runtime cinema configuration (add/remove cinemas via UI settings) — instance files are the current mechanism; UI editor is future work
+- [ ] Support runtime cinema configuration **via a settings UI** — Phase 1 landed: `userData/custom-cinemas.json` (JSON-only, validated through the same plugin pipeline, reload IPC `cinemas:reload-custom`, corruption-safe). Remaining: a UI that reads/writes the file
 
 ### Ratings pipeline modularization
 
@@ -54,7 +54,7 @@
 
 ### Testing
 
-- [x] **Unit tests** (vitest, 266 tests, ~2s):
+- [x] **Unit tests** (vitest, 283 tests, ~2s):
   - [x] Date/time helpers — 50 tests
   - [x] Title normalization + coherence checking — 34 tests
   - [x] Title cleaning rules (FR + EN patterns) — 50 tests
@@ -63,10 +63,11 @@
   - [x] i18n translation, fallback chain, parameter substitution — 24 tests
   - [x] AlloCiné HTML parser (with real fixture) — 12 tests
   - [x] Plugin registry + auto-discovery canaries + `testOnly` release filter — 52 tests
+  - [x] Runtime custom registry (custom-cinemas.json) — 17 tests
   - [ ] IMDB dataset parsing (TSV → SQLite) — not yet
 - [x] **E2E smoke tests** (Playwright + Electron, 7 tests, ~30s):
   - [x] App launch, header, cinema selector (incl. canary ABSENT from bundled app), filter bar, view toggle, about panel, diagnostics panel
-- [x] **CI workflow** — GitHub Actions: typecheck + 266 unit tests + smoke checks + build on every PR/push
+- [x] **CI workflow** — GitHub Actions: typecheck + 283 unit tests + smoke checks + build on every PR/push
 - [x] **TESTING.md** — comprehensive testing strategy mapping 15 failure modes to 6 test layers
 - [x] **ERROR_HANDLING.md** — documents the user-feedback loop + error categories
 - [x] **Coverage headers** — every test file has a header explaining what it catches/misses

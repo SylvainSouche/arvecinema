@@ -73,7 +73,7 @@ npm run format        # format all source files with Prettier
 npm run format:check  # verify formatting without writing (used in CI)
 ```
 
-### Unit tests (vitest, ~2s, 266 tests)
+### Unit tests (vitest, ~2s, 283 tests)
 
 ```bash
 npm run test          # run all unit tests once (rebuilds sqlite for Node first)
@@ -84,7 +84,8 @@ npm run test:coverage # run tests + generate coverage report
 Tests cover: date/time helpers, title normalization, title cleaning rules
 (FR + EN patterns), SQLite cache CRUD, i18n fallback chain, VF/VO detection,
 plugin registry + auto-discovery (incl. the `testOnly` release filter),
-AlloCiné HTML parser (with real fixture).
+runtime custom registry (userData/custom-cinemas.json), AlloCiné HTML parser
+(with real fixture).
 
 ### E2E tests (Playwright + Electron, ~30s)
 
