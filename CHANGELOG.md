@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+- **Canary cinema hidden from releases** — the "Example Cinema (Canary)" instance was registered in every build, including packaged apps. A new `CinemaInstance.testOnly` flag makes the registry keep canary/template instances in dev + unit tests but skip them from bundled builds (`import.meta.env.DEV` baked to `false` at build time). Covered by unit tests (inclusion + exclusion modes) and an e2e assertion that the canary pill is absent from the built app.
+- **better-sqlite3 ABI script fixes** — `rebuild:electron` previously used `electron-builder install-app-deps`, which could silently succeed without recompiling, leaving the module on the wrong ABI (`NODE_MODULE_VERSION 127` vs Electron's `130`) and crashing `schedule:fetch` at app startup. It now uses `electron-rebuild -f -w better-sqlite3`, and `package*`/`build`/`test:e2e` scripts rebuild for the correct ABI themselves. Troubleshooting table in `TESTING.md` + `README.md`.
+- **`clean` / `clean:full` no longer wipe uncommitted changes** — the `git reset --hard` was removed from both scripts (the project's documented intent: remove untracked artifacts only).
+
+### Internal
+- `test:e2e` now runs `npm run build` itself (was a silent prerequisite).
+- Unit test count: 266 (+4 for the `testOnly` release-filter behavior).
+
 ## v0.13.0 (2026-09-21)
 
 ### Fixes
