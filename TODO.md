@@ -116,7 +116,7 @@
 
 ## Packaging
 
-- [ ] Notarize the macOS .dmg (requires Apple Developer ID)
-- [ ] Set up GitHub Releases with automated .dmg upload
-- [ ] Add auto-update support (electron-updater)
+- [ ] Notarize the macOS .dmg (requires Apple Developer ID) — last blocker for auto-update really installing (detection + notify already work; see below)
+- [x] **GitHub Releases with automated .dmg upload** — `.github/workflows/release.yml`: push tag `v*` (or manual dispatch) → macos-14 runner → electron ABI rebuild → electron-builder dmg arm64 → draft Release with `.dmg` + `.blockmap` + `latest-mac.yml` (the metadata electron-updater reads). Contract test: `releaseContract.test.ts` (14 assertions).
+- [x] **Auto-update support (electron-updater)** — `src/main/updater.ts`: `maybeInitAutoUpdater()` on app ready (packaged builds only; skipped for ARVE_REPLAY/ARVE_RECORD fixture runs). Checks the GitHub Releases feed at startup + daily, auto-downloads, installs on quit or after a user dialog click. Unsigned-build caveat documented (macOS install needs Developer ID signing — until notarization the detection/notify path works and install fails informatively). Update status queryable via `getUpdateStatus()` for a future About-panel badge.
 - [ ] Create Windows and Linux builds (currently only macOS arm64)

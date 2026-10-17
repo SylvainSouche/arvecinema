@@ -1,0 +1,71 @@
+# Release — builds the macOS dmg and publishes it to GitHub Releases.
+#
+# Trigger: push a tag matching v* (e.g. `git tag v1.2.0 && git push origin v1.2.0`)
+# or run manually from the Actions tab (workflow_dispatch, tag not required —
+# it publishes the current master state as a prerelease).
+#
+# Produces: dist/*.dmg (+ .blockmap + latest-mac.yml) — the .yml metadata is
+# what electron-updater reads to discover new versions. All three are
+# uploaded to the release, so auto-update works out of the box for signed
+# builds (unsigned builds can still detect/notify — see src/main/updater.ts).
+#
+# The job runs the electron ABI rebuild for better-sqlite3 (same trap the
+# other workflows handle explicitly) before electron-builder packages.
+#
+# Signing: intentionally ABSENT for now. Adding "mac.identity: null" is
+# unnecessary since no codesigning identity exists on the runner — the dmg
+# is ad-hoc signed → users must right-click → Open on first launch. Notar-
+# ization requires an Apple Developer ID (user-gated TODO).
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write # required: create the Release and upload assets
+
+jobs:
+  release-mac:
+    runs-on: macos-14 # arm64 native — matches mac.arm64 target + ABI
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # better-sqlite3 ships prebuilt for the Node ABI, not Electron's — self
+      # recompilation for the packaged app's ABI (same escape hatch as CI).
+      - name: Rebuild better-sqlite3 for Electron
+        run: npx electron-rebuild -f -w better-sqlite3
+
+      - name: Build + package (dmg, arm64)
+        run: npm run build && npx electron-builder --mac dmg
+        env:
+          # Publish to GitHub Releases using the workflow's GITHUB_TOKEN.
+          # electron-builder picks provider github from package.json's
+          # build.publish — GH_TOKEN activates artifact upload.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify artifacts
+        run: ls -la dist/ | grep -E "\.dmg|\.blockmap|latest-mac" || (ls -la dist/ && exit 1)
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # tagged pushes → release for the tag; dispatch → prerelease draft
+          draft: true
+          generate_release_notes: true
+          files: |
+            dist/*.dmg
+            dist/*.blockmap
+            dist/latest-mac.yml

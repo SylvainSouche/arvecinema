@@ -60,7 +60,7 @@ const EXPECTED_LOGGERS = [
   'enricher', 'idResolver', 'ratingsFetcher', 'browserFetch',
   'browserGraphqlFetch', 'allocine', 'imdbDataset', 'imdbScraper',
   'imdbGraphql', 'wikidata', 'cacheDb', 'connectionPool', 'schedule',
-  'cinemas', 'cineChateau', 'networkActivity', 'shutdown',
+  'cinemas', 'cineChateau', 'networkActivity', 'shutdown', 'updater',
 ];
 
 beforeAll(() => {

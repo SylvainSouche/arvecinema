@@ -24,4 +24,5 @@ export const log = {
   cineChateau: getComponentLogger('cine-chateau'),
   networkActivity: getComponentLogger('network'),
   shutdown: getComponentLogger('shutdown'),
+  updater: getComponentLogger('updater'),
 };

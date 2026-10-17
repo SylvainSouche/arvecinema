@@ -73,20 +73,25 @@ npm run format        # format all source files with Prettier
 npm run format:check  # verify formatting without writing (used in CI)
 ```
 
-### Unit tests (vitest, ~2s, 307 tests)
+### Unit tests (vitest, ~2s, 356 tests)
 
 ```bash
 npm run test          # run all unit tests once (rebuilds sqlite for Node first)
 npm run test:watch    # re-run tests on file change
 npm run test:coverage # run tests + generate coverage report
+IMDB_BENCH=1 npm run test   # + full-scale imdb_ratings profile (~20s)
 ```
 
 Tests cover: date/time helpers, title normalization, title cleaning rules
-(FR + EN patterns), SQLite cache CRUD, i18n fallback chain, VF/VO detection,
-plugin registry + auto-discovery (incl. the `testOnly` release filter),
-runtime custom registry (userData/custom-cinemas.json) + its IPC file I/O,
-IMDB dataset TSV parsing (row validator + gzip streaming + TSV→SQLite
-pipeline), AlloCiné HTML parser (with real fixture).
+(FR + EN patterns), SQLite cache CRUD + the imdb_ratings ingest/lookup
+contract, i18n + translations JSON correctness (missing AND stale keys),
+logger/wiring contracts, release + auto-update wiring contracts (14
+assertions), renderer snapshot regressions (MovieCard / WeekGrid /
+LogViewer), VF/VO detection, plugin registry + auto-discovery (incl. the
+`testOnly` release filter), runtime custom registry
+(userData/custom-cinemas.json) + its IPC file I/O, IMDB dataset TSV parsing
+(row validator + gzip streaming + TSV→SQLite pipeline), AlloCiné HTML parser
+(with real fixture).
 
 ### E2E tests (Playwright + Electron, ~20s replayed / ~47s live)
 
@@ -139,6 +144,19 @@ Node-ABI sqlite binary crashes on startup with `ERR_DLOPEN_FAILED`.
 npm run package      # rebuild + build + package for current platform (.dmg / .exe / AppImage)
 npm run package:dir  # same + unpacked directory (faster, for testing the packaged app)
 npm run package:dmg  # same + macOS .dmg only (arm64)
+```
+
+#### Releases & auto-update
+
+Push a `v*` tag to run the release workflow (`.github/workflows/release.yml`):
+it packages the arm64 `.dmg` on a native macOS runner and uploads it — with
+`.blockmap` + `latest-mac.yml` — to a draft GitHub Release. Packaged builds
+then check that feed at startup and daily via `electron-updater`
+(`src/main/updater.ts`) and install on quit or after a user dialog click.
+Until the app is signed + notarized (Apple Developer ID, user-gated), update
+detection and notification work; the install step fails informatively.
+`test/main/releaseContract.test.ts` pins the whole chain (deps, publish
+config, guards, workflow artifacts) in CI.
 ```
 
 ### Environment variables

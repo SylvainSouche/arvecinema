@@ -9,6 +9,7 @@ import { listPlugins } from './cinemas/adapters';
 import type { Movie, ScheduleResponse, CinemaStatus } from './cinemas/types';
 import { enrichWithRatings } from './ratings/ratingsEnricher';
 import { gracefulShutdown } from './ratings/shutdown';
+import { maybeInitAutoUpdater } from './updater';
 import { getNetworkActive } from '../shared/networkActivity';
 import { initLogging, getAllLogs, clearLogs } from './ratings/logger';
 import { log } from './ratings/moduleLoggers';
@@ -613,6 +614,10 @@ app.whenReady().then(() => {
   loadCustomCinemas(customCinemasFile());
 
   createWindow();
+
+  // Auto-update checker (electron-updater, GitHub Releases feed). No-op in
+  // dev and in ARVE_REPLAY/ARVE_RECORD fixture runs — all guards inside.
+  maybeInitAutoUpdater();
 });
 
 // LOW-06: prevent multiple instances of the app. If a second instance is
