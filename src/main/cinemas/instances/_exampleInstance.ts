@@ -11,9 +11,14 @@
 // that this instance is discoverable. If auto-discovery ever breaks, that
 // test fails.
 //
+// Test-only (canary): the `testOnly: true` flag below makes the registry
+// register this instance in dev + unit tests, but skip it in bundled
+// release builds (`electron-vite build`) — end users never see it in the
+// cinema list. See `registry.ts` for the filter.
+//
 // You can also use this file as a copy-paste template when adding a real
 // new cinema — just rename the file, change the id/name/city/color/adapter,
-// and delete this comment block.
+// set `testOnly` to false (or drop it), and delete this comment block.
 // ──────────────────────────────────────────────────────────────────────────
 
 import type { CinemaInstance } from '../adapters/plugin';
@@ -23,6 +28,7 @@ const cinema: CinemaInstance = {
   name: 'Example Cinema (Canary)',
   city: 'Nowhere',
   color: '#9ca3af',
+  testOnly: true,
   adapter: {
     kind: 'example',
     baseUrl: 'https://example.com',

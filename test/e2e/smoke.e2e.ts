@@ -65,17 +65,20 @@ test('cinema selector renders with at least 4 real cinemas', async () => {
   cleanup = app.cleanup;
 
   // Wait for the cinema selector to render — it shows cinema names as pills.
-  // The registry auto-discovers 4 real cinemas + 1 canary (example-cinema).
-  // We wait for at least the first cinema button to appear.
+  // The registry auto-discovers 4 real cinemas. The canary "example-cinema"
+  // is marked `testOnly: true` so the registry skips it in bundled builds
+  // (this test launches the built app) — see registry.ts buildCinemas().
   const cinemaButton = app.page.locator('button', { hasText: /Ciné|Cinéma/ }).first();
   await expect(cinemaButton).toBeVisible({ timeout: 15_000 });
 
-  // Count cinema pills — should be at least 4 real cinemas
-  // (mont-blanc, cluses, bonneville, chamonix). The canary "example-cinema"
-  // may also appear (showing as "Example Cinema (Canary)"), so we check ≥4.
-  const cinemaPills = app.page.locator('button', { hasText: /Ciné|Cinéma|Vox|Example/ });
+  // Count cinema pills — should be exactly the 4 real cinemas
+  // (mont-blanc, cluses, bonneville, chamonix).
+  const cinemaPills = app.page.locator('button', { hasText: /Ciné|Cinéma|Vox/ });
   const count = await cinemaPills.count();
   expect(count).toBeGreaterThanOrEqual(4);
+
+  // The test-only canary must NOT be registered in a bundled build.
+  expect(await app.page.locator('button', { hasText: 'Example Cinema' }).count()).toBe(0);
 });
 
 test('filter bar is visible with search + audio pills + sort', async () => {

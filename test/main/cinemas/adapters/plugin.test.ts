@@ -396,8 +396,56 @@ describe('TRUE drop-in auto-discovery', () => {
 //
 // We test against the real CINEMAS + CINEMA_INFOS arrays exported by the
 // registry — they should include the 4 real instances + 1 canary.
+//
+// Note on environments: vitest runs with Vite-style `import.meta.env.DEV`
+// semantics, so the registry's default filter INCLUDES test-only (canary)
+// instances here — exactly like `electron-vite dev`. This is the opposite of
+// a bundled release (`electron-vite build`, DEV=false), where the canary is
+// filtered out. The filtering behavior itself is covered by the
+// "testOnly instances" describe block below, which drives `buildCinemas()`
+// explicitly for both modes.
 
-import { CINEMAS, CINEMA_INFOS } from '../../../../src/main/cinemas/registry';
+import { CINEMAS, CINEMA_INFOS, buildCinemas } from '../../../../src/main/cinemas/registry';
+
+// ── testOnly instances (canary) — dev/test included, release excluded ──────
+//
+// `_exampleInstance.ts` declares `testOnly: true`. The registry must:
+//   1. Register it in tests (and dev) — covered by the canary assertions
+//      above, since vitest's DEV default keeps it visible here.
+//   2. Skip it in bundled release builds. We can't build a release bundle in
+//      a unit test, so we drive `buildCinemas({ includeTestOnly: false })`
+//      directly — the exact code path a release build takes (its
+//      `import.meta.env.DEV` is baked in as false).
+describe('testOnly instances are registered in tests but excluded from releases', () => {
+  it('explicit includeTestOnly: true registers the canary (dev behavior)', () => {
+    const ids = buildCinemas({ includeTestOnly: true }).map((c) => c.id);
+    expect(ids).toContain('example-cinema');
+  });
+
+  it('explicit includeTestOnly: false skips the canary (release behavior)', () => {
+    const cinemas = buildCinemas({ includeTestOnly: false });
+    const ids = cinemas.map((c) => c.id);
+    expect(ids).not.toContain('example-cinema');
+    // The real cinemas must NOT be affected by the filter.
+    expect(ids).toContain('mont-blanc');
+    expect(ids).toContain('cluses');
+    expect(ids).toContain('bonneville');
+    expect(ids).toContain('chamonix');
+  });
+
+  it('includeTestOnly: false still keeps exactly the 4 real cinemas', () => {
+    const cinemas = buildCinemas({ includeTestOnly: false });
+    expect(cinemas.map((c) => c.id).sort()).toEqual(
+      ['mont-blanc', 'cluses', 'bonneville', 'chamonix'].sort(),
+    );
+  });
+
+  it('every included cinema still has a working adapter when the filter is on', () => {
+    for (const cinema of buildCinemas({ includeTestOnly: false })) {
+      expect(typeof cinema.adapter.fetchSchedule).toBe('function');
+    }
+  });
+});
 
 describe('TRUE drop-in cinema instance auto-discovery', () => {
   it('loads all 4 real cinema instances + 1 canary = at least 5 cinemas', () => {

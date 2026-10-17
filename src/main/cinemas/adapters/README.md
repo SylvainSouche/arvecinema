@@ -41,6 +41,12 @@ The canary files (`examplePlugin.ts` + `_exampleInstance.ts`) are permanent
 fixtures — the test suite (`test/main/cinemas/adapters/plugin.test.ts`)
 asserts they're discoverable. If auto-discovery ever breaks, those tests fail.
 
+> Release filtering: `_exampleInstance.ts` declares `testOnly: true`, so the
+> registry registers the canary in `npm run dev` and unit tests, but skips it
+> in bundled builds (`electron-vite build` → `import.meta.env.DEV === false`).
+> End users never see it in the cinema list. A new real cinema must NOT set
+> `testOnly` (or must set it to `false`).
+
 ## Adding a new cinema SITE (truly drop-in — no other file edits)
 
 Drop a `.ts` file in `src/main/cinemas/instances/megève.ts`:
@@ -200,13 +206,13 @@ The `plugin.ts` module exports helpers for plugin authors:
 
 ## Existing cinema instances
 
-| Cinema id        | File                            | City             |
-| ---------------- | ------------------------------- | ---------------- |
-| `mont-blanc`     | `instances/montBlanc.ts`        | Sallanches       |
-| `cluses`         | `instances/cluses.ts`           | Cluses           |
-| `bonneville`     | `instances/bonneville.ts`       | Bonneville       |
-| `chamonix`       | `instances/chamonix.ts`         | Chamonix         |
-| `example-cinema` | `instances/_exampleInstance.ts` | Nowhere (canary) |
+| Cinema id        | File                            | City                              |
+| ---------------- | ------------------------------- | --------------------------------- |
+| `mont-blanc`     | `instances/montBlanc.ts`        | Sallanches                        |
+| `cluses`         | `instances/cluses.ts`           | Cluses                            |
+| `bonneville`     | `instances/bonneville.ts`       | Bonneville                        |
+| `chamonix`       | `instances/chamonix.ts`         | Chamonix                          |
+| `example-cinema` | `instances/_exampleInstance.ts` | Nowhere (canary — `testOnly` true, excluded from release builds) |
 
 ## Testing
 
@@ -216,4 +222,6 @@ captured HTML/JSON, then assert the output `Movie[]` shape. See TODO.md
 
 The auto-discovery canaries (`examplePlugin.ts` + `_exampleInstance.ts`) are
 covered by `test/main/cinemas/adapters/plugin.test.ts` — if either ever
-stops being discovered, the "TRUE drop-in" tests fail.
+stops being discovered, the "TRUE drop-in" tests fail. The tests also cover
+the release-build filter: with `includeTestOnly: false` (what a bundled
+build does), the canary is skipped while the 4 real cinemas still load.

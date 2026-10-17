@@ -143,6 +143,11 @@ export interface CinemaInstance {
   city: string;
   /** Hex color used for the cinema badge on each showtime chip. */
   color: string;
+  /** Mark a canary/template instance as test-only. Such instances are
+   *  registered in dev (`electron-vite dev`) and unit tests (`vitest`) but
+   *  filtered out of bundled/release builds (`electron-vite build`), so they
+   *  never appear in the UI end users see. Default: false (a real cinema). */
+  testOnly?: boolean;
   /** Adapter config — `kind` selects the plugin, other fields are
    *  plugin-specific (baseUrl, theaterId, etc.). */
   adapter: CinemaConfig;

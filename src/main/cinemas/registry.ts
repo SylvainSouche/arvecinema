@@ -38,11 +38,25 @@ const instanceModules = import.meta.glob<CinemaInstance>('./instances/*.ts', {
 // Each instance is validated by its referenced plugin's `validateConfig`
 // function. Invalid instances are skipped with a warning logged to the
 // console + LogViewer — the rest of the cinemas still load.
-function buildCinemas(): Cinema[] {
+//
+// Instances marked `testOnly: true` (canary/template instances) are
+// registered only in dev + unit tests and skipped from bundled release
+// builds. The discriminator is Vite's build-time `import.meta.env.DEV`:
+//   - `electron-vite dev`  -> DEV=true  (canary registered)
+//   - `vitest`             -> DEV=true  (canary registered, tests assert it)
+//   - `electron-vite build`-> DEV=false (canary filtered out of releases)
+// We never use `app.isPackaged` here: this module is imported by unit tests
+// without an electron mock, where importing electron is not safe.
+export function buildCinemas(options: { includeTestOnly?: boolean } = {}): Cinema[] {
+  const includeTestOnly = options.includeTestOnly ?? import.meta.env.DEV;
   const out: Cinema[] = [];
   const seenIds = new Set<string>();
 
   for (const [modulePath, instance] of Object.entries(instanceModules)) {
+    if (!includeTestOnly && instance?.testOnly) {
+      log.cinemas.info(`[registry] ${modulePath}: test-only instance — skipping in release build`);
+      continue;
+    }
     if (!instance) {
       log.cinemas.warn(`[registry] ${modulePath}: no default export — skipping`);
       continue;
