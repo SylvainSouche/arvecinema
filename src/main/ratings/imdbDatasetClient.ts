@@ -143,10 +143,13 @@ async function downloadDataset(destPath: string): Promise<void> {
   debug(`downloaded ${totalBytes} bytes`);
 }
 
-function parseLine(line: string): [string, number, number] | null {
+/** Parse one line of the IMDB ratings TSV.
+ *  Returns [tconst, rating, votes] or null for header/invalid rows.
+ *  Exported for unit tests (test/main/ratings/imdbDatasetParse.test.ts). */
+export function parseLine(line: string): [string, number, number] | null {
   if (!line || line.startsWith('tconst\t')) return null;
   const [tconst, avgStr, votesStr] = line.split('\t');
-  if (!tconst || !tconst.startsWith('tt')) return null;
+  if (!tconst || !/^tt\d+$/.test(tconst)) return null;
   if (avgStr === '\\N' || votesStr === '\\N') return null;
   const rating = Number(avgStr);
   const votes = Number(votesStr);
@@ -155,12 +158,15 @@ function parseLine(line: string): [string, number, number] | null {
   return [tconst, rating, votes];
 }
 
-/** Stream-parse the .tsv.gz and bulk-insert into SQLite in a transaction. */
-async function parseAndInsert(filePath: string): Promise<number> {
+/**
+ * Stream-decompress + parse a title.ratings.tsv.gz file into rows.
+ * Exported for unit tests — no DB involved.
+ * Returns rejected rows dropped; only valid [tconst, rating, votes] rows.
+ */
+export async function readAndParseTsvGz(filePath: string): Promise<Array<[string, number, number]>> {
   return new Promise((resolve, reject) => {
     const rows: Array<[string, number, number]> = [];
     let buffer = '';
-    let totalParsed = 0;
 
     const stream = fs.createReadStream(filePath).pipe(createGunzip());
 
@@ -171,27 +177,25 @@ async function parseAndInsert(filePath: string): Promise<number> {
         const line = buffer.substring(0, newlineIdx);
         buffer = buffer.substring(newlineIdx + 1);
         const row = parseLine(line);
-        if (row) {
-          rows.push(row);
-          totalParsed++;
-        }
+        if (row) rows.push(row);
       }
     });
 
-    stream.on('end', () => {
-      try {
-        clearAndBulkInsertImdbRatings(rows);
-        debug(`inserted ${totalParsed} ratings into SQLite (table imdb_ratings)`);
-        resolve(totalParsed);
-      } catch (err) {
-        reject(err);
-      }
-    });
-
-    stream.on('error', (err: Error) => {
-      reject(new Error(`parse failed: ${err.message}`));
-    });
+    stream.on('end', () => resolve(rows));
+    stream.on('error', (err: Error) => reject(new Error(`parse failed: ${err.message}`)));
   });
+}
+
+/** Stream-parse the .tsv.gz and bulk-insert into SQLite in a transaction. */
+async function parseAndInsert(filePath: string): Promise<number> {
+  try {
+    const rows = await readAndParseTsvGz(filePath);
+    clearAndBulkInsertImdbRatings(rows);
+    debug(`inserted ${rows.length} ratings into SQLite (table imdb_ratings)`);
+    return rows.length;
+  } catch (err) {
+    throw err instanceof Error ? err : new Error(String(err));
+  }
 }
 
 async function refreshDataset(): Promise<void> {
