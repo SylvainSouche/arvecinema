@@ -35,6 +35,12 @@ export default defineConfig({
     env: {
       TZ: 'Europe/Paris',
     },
+    // FORKS pool (child processes), not threads: TZ env above must apply from
+    // process birth — threads share one host process whose V8/ICU zone is
+    // cached at boot, so env TZ is silently ignored and renderer snapshot
+    // tests shifted every showtime chip +2h on CI (UTC host) vs local
+    // (Paris). Forks are marginally slower to boot but zone-correct.
+    pool: 'forks',
     // Coverage configuration — opt-in via `npm run test:coverage`
     coverage: {
       provider: 'v8',

@@ -22,11 +22,22 @@
 //
 // Determinism rules (IMPORTANT when updating fixtures):
 //   - locale pinned to 'fr' (default) via setLocale — text snapshot stability
+//   - timezone pinned below (vi.hoisted, before imports) to Europe/Paris —
+//     the app's canonical zone (src/main/index.ts imports ./tz first).
+//     CI runs in UTC, which shifted every showtime chip +2h and broke the
+//     comparisons.
 //   - WeekGrid fixtures use far-future dates (2099-07-XX, fixed weekdays)
 //     so month/weekday computations are time-independent
 // ──────────────────────────────────────────────────────────────────────────
 
-import { describe, it, expect, beforeEach } from 'vitest';
+// Determinism rules (IMPORTANT when updating fixtures):
+//   - locale pinned to 'fr' (default) via setLocale — text snapshot stability
+//   - timezone pinned to Europe/Paris by vitest.config's `env` (with the
+//     `forks` pool so it applies at process birth) — the app's canonical
+//     zone; a UTC host would otherwise shift every showtime chip +2h.
+//   - WeekGrid fixtures use far-future dates (2099-07-XX, fixed weekdays)
+//     so month/weekday computations are time-independent
+// ──────────────────────────────────────────────────────────────────────────</think><tool_call>edit<arg_key>newString</arg_key><arg_value>import { describe, it, expect, beforeEach } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MovieCard } from '../../src/renderer/components/MovieCard';
