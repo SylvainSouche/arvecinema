@@ -50,6 +50,62 @@ const HEADERS: Record<string, string> = {
   Accept: 'application/json',
 };
 
+// ── In-session response memoization ────────────────────────────────────────
+//
+// Cross-session caching already lives in idResolver's SQLite ids_cache.
+// What was MISSING is the within-session layer, which caused real repeat
+// traffic in two patterns:
+//   (a) NEGATIVE lookups are not cached by the enricher → every refresh /
+//       retry-button pass re-searched films that simply have no Wikidata
+//       entity (each miss costs 2-12 API calls: 2 languages × search +
+//       up to 5 candidate fetches).
+//   (b) findByTitle's cleaned-title + original-title double search
+//       re-fetched the same candidate entities, and multi-film passes hit
+//       the same QIDs again (e.g. franchise titles).
+// Wikidata content is effectively immutable within a session, so responses
+// are memoized per URL. HTTP-level conditional caching (ETag/304) was
+// evaluated and rejected: wbgetentities/wbsearchentities URLs vary by
+// id-set/title, so there are no stable "hot" URLs that would hit a 304 —
+// the dedup has to happen at the URL level, which is exactly this cache.
+// HTTP errors and timeouts are deliberately NOT memoized (transient —
+// the next attempt must reach the network again).
+
+const RESPONSE_CACHE_MAX_ENTRIES = 1200;
+const responseCache = new Map<string, unknown>();
+
+/** Test hook — empties the in-session memo (not the SQLite ids_cache). */
+export function clearWikidataResponseCache(): void {
+  responseCache.clear();
+}
+
+/** Test hook — number of memoized URLs. */
+export function wikidataResponseCacheSize(): number {
+  return responseCache.size;
+}
+
+/**
+ * Fetch a Wikidata API URL, memoizing parsed JSON per URL for the process
+ * lifetime. Returns undefined on HTTP error / timeout / network failure —
+ * in those cases nothing is cached, so a retry goes back to the network.
+ */
+async function fetchWikidataJson(url: string): Promise<unknown | undefined> {
+  const cached = responseCache.get(url);
+  if (cached !== undefined || responseCache.has(url)) return cached;
+
+  try {
+    const res = await withNetworkTracking(() =>
+      fetchWithTimeout(url, { headers: HEADERS }, REQUEST_TIMEOUT_MS),
+    );
+    if (!res.ok) return undefined;
+    const data: unknown = await res.json();
+    if (responseCache.size >= RESPONSE_CACHE_MAX_ENTRIES) responseCache.clear();
+    responseCache.set(url, data);
+    return data;
+  } catch {
+    return undefined;
+  }
+}
+
 // ── Lookup by Allociné ID (MediaWiki search API — no SPARQL) ──────────────
 
 /**
@@ -67,11 +123,10 @@ async function findQidByAllocineId(allocineId: string): Promise<string | null> {
   url.searchParams.set('srnamespace', '0');
 
   try {
-    const res = await withNetworkTracking(() =>
-      fetchWithTimeout(url.toString(), { headers: HEADERS }, REQUEST_TIMEOUT_MS),
-    );
-    if (!res.ok) return null;
-    const data = (await res.json()) as { query?: { search?: Array<{ title: string }> } };
+    const data = (await fetchWikidataJson(url.toString())) as
+      | { query?: { search?: Array<{ title: string }> } }
+      | undefined;
+    if (data === undefined) return null;
     const hits = data.query?.search ?? [];
     if (hits.length === 0) return null;
     return hits[0].title;
@@ -118,11 +173,8 @@ async function searchEntities(title: string, language = 'fr'): Promise<WbSearchR
   url.searchParams.set('type', 'item');
 
   try {
-    const res = await withNetworkTracking(() =>
-      fetchWithTimeout(url.toString(), { headers: HEADERS }, REQUEST_TIMEOUT_MS),
-    );
-    if (!res.ok) return [];
-    const data = (await res.json()) as { search?: WbSearchResult[] };
+    const data = (await fetchWikidataJson(url.toString())) as { search?: WbSearchResult[] } | undefined;
+    if (data === undefined) return [];
     return data.search ?? [];
   } catch {
     return [];
@@ -151,16 +203,11 @@ async function batchGetFilmIds(qids: string[]): Promise<Map<string, WikidataIds>
     url.searchParams.set('languages', 'fr|en');
 
     try {
-      const res = await withNetworkTracking(() =>
-        fetchWithTimeout(url.toString(), { headers: HEADERS }, REQUEST_TIMEOUT_MS),
-      );
-      if (!res.ok) {
-        log.wikidata.warn(
-          `[wikidata] wbgetentities returned HTTP ${res.status} for ${batch.length} IDs`,
-        );
+      const data = (await fetchWikidataJson(url.toString())) as WbGetEntitiesResult | undefined;
+      if (data === undefined) {
+        log.wikidata.warn(`[wikidata] wbgetentities failed for ${batch.length} IDs`);
         continue;
       }
-      const data = (await res.json()) as WbGetEntitiesResult;
       for (const qid of batch) {
         const ids = parseEntity(data.entities?.[qid], qid);
         if (ids) result.set(qid, ids);
@@ -227,11 +274,8 @@ async function getFilmIds(qid: string): Promise<WikidataIds | null> {
   url.searchParams.set('languages', 'fr|en');
 
   try {
-    const res = await withNetworkTracking(() =>
-      fetchWithTimeout(url.toString(), { headers: HEADERS }, REQUEST_TIMEOUT_MS),
-    );
-    if (!res.ok) return null;
-    const data = (await res.json()) as WbGetEntitiesResult;
+    const data = (await fetchWikidataJson(url.toString())) as WbGetEntitiesResult | undefined;
+    if (data === undefined) return null;
     return parseEntity(data.entities?.[qid], qid);
   } catch {
     return null;

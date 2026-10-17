@@ -91,8 +91,9 @@
 
 - [x] **BrowserWindow pool for browserFetch** — per-domain idle window reuse, ~10s saved per AlloCiné enrichment cycle
 - [x] **AlloCiné pages 100× smaller** — switched from `browserFetch` (full DOM ~600 KB) to `pooledFetch` (raw HTML ~50 KB). Falls back to `browserFetch` if Cloudflare detected.
-- [ ] Consider pre-fetching Wikidata IDs at schedule fetch time (parallel with cinema HTML parsing)
-- [ ] Investigate caching Wikidata API responses at the HTTP level (304 Not Modified)
+- [x] **In-session response memoization** — Wikidata API responses memoized per URL for the process lifetime (`fetchWikidataJson` in wikidataClient.ts). This was the real repeat-traffic leak: negative lookups ("no Wikidata match") were never cached by the enricher, so every refresh / retry pass re-spent 2-12 API calls per unmatched film; the cleaned-title + original-title double search also refetched the same candidate entities. Now positive AND negative results are session-memoized, HTTP errors and timeouts deliberately excluded (transient — retries must reach the network). Tests: `test/main/ratings/wikidataClientCache.test.ts` (7 cases, mocked network).
+- [x] **HTTP 304 conditional caching — evaluated, rejected** — wbgetentities/wbsearchentities URLs vary by id-set/title (no stable "hot" URLs), so an ETag/If-None-Match layer would never hit. The dedup happens one level up: permanent cross-session caching lives in idResolver's SQLite ids_cache, and the new in-session URL memo kills intra-session repeats. Documented in wikidataClient.ts.
+- [ ] Pre-fetching Wikidata IDs at schedule fetch time (parallel with cinema HTML parsing) — deferred: after the first launch every title is in the permanent ids_cache (phase 0 is instant) and enrichment already runs progressively as movies stream in, so the overlap would save seconds only on the first run after brand-new films appear.
 - [x] Profile the `imdb_ratings` table (1.71M rows) — **measured, closed by design**:
   - lookups are already optimal: `tconst TEXT PRIMARY KEY … WITHOUT ROWID` stores ALL
     columns in the PK b-tree → `getImdbRatingsBatch(60 ids)` = **0.084 ms**, single
