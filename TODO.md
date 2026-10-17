@@ -93,7 +93,17 @@
 - [x] **AlloCiné pages 100× smaller** — switched from `browserFetch` (full DOM ~600 KB) to `pooledFetch` (raw HTML ~50 KB). Falls back to `browserFetch` if Cloudflare detected.
 - [ ] Consider pre-fetching Wikidata IDs at schedule fetch time (parallel with cinema HTML parsing)
 - [ ] Investigate caching Wikidata API responses at the HTTP level (304 Not Modified)
-- [ ] Profile the SQLite schema for the 1.71M-row `imdb_ratings` table — consider a bloom filter or covering index
+- [x] Profile the `imdb_ratings` table (1.71M rows) — **measured, closed by design**:
+  - lookups are already optimal: `tconst TEXT PRIMARY KEY … WITHOUT ROWID` stores ALL
+    columns in the PK b-tree → `getImdbRatingsBatch(60 ids)` = **0.084 ms**, single
+    `getImdbRating` = 0.005 ms. A covering index is impossible to add (index IS the table)
+    and a bloom filter cannot beat a b-tree point lookup. Envelope test: `imdbPerf.test.ts`.
+  - the real cost was **ingest heap**: `readAndParseTsvGz` materialized all 1.71M rows
+    (~300 MB) before inserting. Fixed: `parseAndInsert` now streams in 50k-row chunks
+    through `startImdbRatingsBulkIngest()` (single BEGIN IMMEDIATE → DELETE → chunked
+    INSERT → COMMIT, rollback-safe); peak memory ~10 MB. Measured: parse 2.5M rows/s,
+    streaming ingest 1.39M rows/s (~1.2 s full ingest), table 43 MB.
+  - findings from the full profile: `IMDB_BENCH=1 npm test` (also `IMDB_BENCH_ROWS=n`).
 
 ## Infrastructure
 

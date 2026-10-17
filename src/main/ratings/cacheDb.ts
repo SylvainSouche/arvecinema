@@ -523,6 +523,59 @@ export function clearAndBulkInsertImdbRatings(
   }
 }
 
+/** A streaming bulk-ingest session for the imdb_ratings table.
+ *  From startImdbRatingsBulkIngest():
+ *    - insert(rows): synchronous per-row inserts (uncommitted)
+ *    - finish(): COMMIT — all rows become visible atomically
+ *    - abort(): ROLLBACK — table returns to its pre-ingest state
+ *  Between start and finish/abort the process must not use the db for
+ *  other write paths (single BEGIN IMMEDIATE locks writes until COMMIT). */
+export interface ImdbRatingsIngestSession {
+  insert(rows: Array<[string, number, number]>): void;
+  finish(): void;
+  abort(): void;
+}
+
+/**
+ * Streaming variant of clearAndBulkInsertImdbRatings for the ~1.71M-row
+ * dataset refresh: opens BEGIN IMMEDIATE + DELETE up-front, then the caller
+ * feeds rows in bounded chunks (see imdbDatasetClient.parseAndInsert).
+ * Peak memory stays ~10 MB instead of materializing the full row array,
+ * and the table is replaced atomically (rollback-safe on parse failure).
+ */
+export function startImdbRatingsBulkIngest(): ImdbRatingsIngestSession {
+  const d = openDb();
+  if (!d) {
+    return { insert: () => {}, finish: () => {}, abort: () => {} };
+  }
+  d.exec('BEGIN IMMEDIATE');
+  d.exec('DELETE FROM imdb_ratings');
+  const insert = d.prepare(
+    'INSERT OR REPLACE INTO imdb_ratings (tconst, rating, votes) VALUES (?, ?, ?)',
+  );
+  let finished = false;
+  return {
+    insert(rows) {
+      if (finished) throw new Error('startImdbRatingsBulkIngest: session already closed');
+      for (const row of rows) insert.run(...row);
+    },
+    finish() {
+      if (finished) return;
+      finished = true;
+      d.exec('COMMIT');
+    },
+    abort() {
+      if (finished) return;
+      finished = true;
+      try {
+        d.exec('ROLLBACK');
+      } catch {
+        /* no active transaction (e.g. sqlite auto-rolled-back already) */
+      }
+    },
+  };
+}
+
 // ── Migration from old JSON cache files ────────────────────────────────────
 
 /** Migrate the old `ids-cache.json` and `ratings-cache.json` files to

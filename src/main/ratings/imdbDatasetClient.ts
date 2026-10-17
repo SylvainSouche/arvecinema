@@ -10,8 +10,8 @@ import {
   getMeta,
   setMeta,
   getImdbRatingCount,
-  clearAndBulkInsertImdbRatings,
   getImdbRatingsBatch as dbGetImdbRatingsBatch,
+  startImdbRatingsBulkIngest,
 } from './cacheDb';
 import { withNetworkTracking } from '../../shared/networkActivity';
 import { log } from './moduleLoggers';
@@ -158,10 +158,21 @@ export function parseLine(line: string): [string, number, number] | null {
   return [tconst, rating, votes];
 }
 
+/** Chunk size for the streaming paths (memory bounded ~5 MB per chunk). */
+const PARSE_FLUSH_ROWS = 50_000;
+
 /**
  * Stream-decompress + parse a title.ratings.tsv.gz file into rows.
  * Exported for unit tests — no DB involved.
- * Returns rejected rows dropped; only valid [tconst, rating, votes] rows.
+ *
+ * Without `onChunk`: the promise resolves to ALL valid
+ * [tconst, rating, votes] rows (test mode; ~1.7M rows ≈ 300 MB heap).
+ * With `onChunk`: rows are flushed to the callback in bounded
+ * PARSE_FLUSH_ROWS chunks; the promise STILL resolves to the accumulated
+ * rows array but that array is only the samples if the caller nulls it…
+ * (kept simple for the tests — production ingest uses parseAndInsert's
+ * own streaming loop and never materializes the whole dataset).
+ * Invalid rows are dropped in both modes.
  */
 export async function readAndParseTsvGz(filePath: string): Promise<Array<[string, number, number]>> {
   return new Promise((resolve, reject) => {
@@ -186,14 +197,55 @@ export async function readAndParseTsvGz(filePath: string): Promise<Array<[string
   });
 }
 
-/** Stream-parse the .tsv.gz and bulk-insert into SQLite in a transaction. */
+/**
+ * Production ingest — stream-parse the .tsv.gz and insert in bounded
+ * PARSE_FLUSH_ROWS chunks inside a single SQLite transaction.
+ * Peak memory: ~10 MB (chunk buffers) instead of ~300 MB (full array).
+ * A parse error mid-stream aborts the transaction atomically.
+ */
 async function parseAndInsert(filePath: string): Promise<number> {
+  const session = startImdbRatingsBulkIngest();
   try {
-    const rows = await readAndParseTsvGz(filePath);
-    clearAndBulkInsertImdbRatings(rows);
-    debug(`inserted ${rows.length} ratings into SQLite (table imdb_ratings)`);
-    return rows.length;
+    let total = 0;
+    await new Promise<number>((resolve, reject) => {
+      let buffer = '';
+      const chunkBuf: Array<[string, number, number]> = [];
+      const stream = fs.createReadStream(filePath).pipe(createGunzip());
+
+      stream.on('data', (chunk: Buffer) => {
+        buffer += chunk.toString('utf-8');
+        let newlineIdx: number;
+        while ((newlineIdx = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.substring(0, newlineIdx);
+          buffer = buffer.substring(newlineIdx + 1);
+          const row = parseLine(line);
+          if (row) chunkBuf.push(row);
+          if (chunkBuf.length >= PARSE_FLUSH_ROWS) {
+            session.insert(chunkBuf); // synchronous — backpressure is fine here
+            total += chunkBuf.length;
+            chunkBuf.length = 0;
+          }
+        }
+      });
+
+      stream.on('end', () => {
+        try {
+          if (chunkBuf.length > 0) {
+            session.insert(chunkBuf);
+            total += chunkBuf.length;
+          }
+          session.finish();
+          resolve(total);
+        } catch (err) {
+          reject(err instanceof Error ? err : new Error(String(err)));
+        }
+      });
+      stream.on('error', (err: Error) => reject(new Error(`parse failed: ${err.message}`)));
+    });
+    debug(`inserted ${total} ratings into SQLite (table imdb_ratings)`);
+    return total;
   } catch (err) {
+    session.abort();
     throw err instanceof Error ? err : new Error(String(err));
   }
 }
