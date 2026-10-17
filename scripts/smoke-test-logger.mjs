@@ -91,7 +91,12 @@ const tsFiles = [...walk(mainSrc, '.ts'), ...walk(sharedSrc, '.ts')];
 let strayCount = 0;
 for (const file of tsFiles) {
   const rel = path.relative(root, file);
-  if (rel.endsWith('ratings/logger.ts')) continue; // legit: console dispatcher
+  // Legit exceptions — intentional console sinks:
+  //  - ratings/logger.ts: the ConsoleDispatcher feeding the memory/file logs
+  //  - shared/simpleLogger.ts: minimal console logger for shared/ modules that
+  //    can't import Electron — its output is captured by the ConsoleDispatcher.
+  if (rel.endsWith('ratings/logger.ts')) continue;
+  if (rel.endsWith('shared/simpleLogger.ts')) continue;
   const src = fs.readFileSync(file, 'utf8');
   // Strip comments + string literals to avoid false positives
   const stripped = src
