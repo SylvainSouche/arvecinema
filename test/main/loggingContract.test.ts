@@ -129,6 +129,10 @@ describe('logging contract: moduleLoggers component coverage (real import)', () 
   });
 
   it('no stray console.* calls outside logger.ts (console migration audit)', () => {
+    // Raw line-based scan, NOT string-stripping: the old strip-regexes
+    // (quote gymnastics on template literals + French apostrophes) silently
+    // swallowed matches in some files and let 10 real console.error calls
+    // in index.ts through the audit undetected.
     const violations: string[] = [];
     for (const dir of ['src/main', 'src/shared']) {
       for (const file of walkFiles(path.join(process.cwd(), dir), '.ts')) {
@@ -138,15 +142,15 @@ describe('logging contract: moduleLoggers component coverage (real import)', () 
         //  - shared/simpleLogger.ts: console sink for Electron-less shared modules
         if (rel.endsWith('ratings/logger.ts')) continue;
         if (rel.endsWith('shared/simpleLogger.ts')) continue;
-        const src = fs.readFileSync(file, 'utf8');
-        const stripped = src
-          .replace(/\/\/[^\n]*/g, '') // line comments
-          .replace(/\/\*[\s\S]*?\*\//g, '') // block comments
-          .replace(/"(?:\\.|[^"\\])*"/g, '""') // double-quote strings
-          .replace(/'(?:\\.|[^'\\])*'/g, "''") // single-quote strings
-          .replace(/`(?:\\.|[^`\\])*`/g, '``'); // template strings
-        const matches = stripped.match(/\bconsole\.(log|warn|error)\(/g);
-        if (matches) violations.push(`${rel}: ${matches.length} stray console calls`);
+        const lines = fs.readFileSync(file, 'utf8').split('\n');
+        lines.forEach((line, i) => {
+          const t = line.trim();
+          if (t.startsWith('//') || t.startsWith('/*') || t.startsWith('*')) return; // comment
+          if (line.includes('logging:exit-path')) return; // documented exit-path stderr
+          if (/\bconsole\.(log|warn|error)\s*\(/.test(line)) {
+            violations.push(`${rel}:${i + 1}: stray console call`);
+          }
+        });
       }
     }
     expect(violations).toEqual([]);

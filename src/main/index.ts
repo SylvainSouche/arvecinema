@@ -10,6 +10,15 @@ import type { Movie, ScheduleResponse, CinemaStatus } from './cinemas/types';
 import { enrichWithRatings } from './ratings/ratingsEnricher';
 import { gracefulShutdown } from './ratings/shutdown';
 import { maybeInitAutoUpdater } from './updater';
+import {
+  buildAllowedChildDomains,
+  isChildNavigationAllowed,
+} from './navigationPolicy';
+import {
+  parseCinemaIdsInput,
+  parseRetryMoviesInput,
+  defaultSanitizeString,
+} from './security/ipcValidation';
 import { getNetworkActive } from '../shared/networkActivity';
 import { initLogging, getAllLogs, clearLogs } from './ratings/logger';
 import { log } from './ratings/moduleLoggers';
@@ -26,6 +35,36 @@ function notifyCinemasChanged(): void {
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('cinemas:changed');
   }
+  // The child-window navigation allow-list is derived from the live cinema
+  // registry (custom cinemas add new base URLs) — rebuild it here too.
+  rebuildNavigationAllowList();
+}
+
+// ── Child-window navigation max allow-list (navigationPolicy.ts) ──────────
+// REVIEW-SEC-01: replace the old suffix-hostname heuristic with an explicit
+// allow-list, rebuilt whenever the cinema registry changes (custom cinemas
+// may point at new domains).
+
+let navigationAllowList: ReadonlySet<string> = buildAllowedChildDomains([]);
+
+function rebuildNavigationAllowList(): void {
+  const baseUrls: string[] = [];
+  for (const c of CINEMAS) {
+    const baseUrl = (c.adapter as { config?: { baseUrl?: unknown } }).config?.baseUrl;
+    if (typeof baseUrl === 'string' && baseUrl.length > 0) baseUrls.push(baseUrl);
+  }
+  navigationAllowList = buildAllowedChildDomains(baseUrls);
+  log.schedule.debug(
+    `[navigation] child-window allow-list rebuilt: ${[...navigationAllowList].join(', ')}`,
+  );
+}
+
+/** Grep-proofed sender check: accept privileged operations only from
+ *  webContents this app actually created (the main renderer, log viewer
+ *  windows, devtools…). Anything else (e.g. a webview injected later) is
+ *  rejected. */
+function isKnownRendererSender(evt: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): boolean {
+  return BrowserWindow.getAllWindows().some((w) => w.webContents === evt.sender);
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -84,9 +123,21 @@ ipcMain.handle('cinemas:reload-custom', () => {
 // distinction the UI would silently present an empty cinema as if it had
 // nothing scheduled.
 
-ipcMain.handle('schedule:fetch', async (_evt, cinemaIds?: string[]): Promise<ScheduleResponse> => {
+ipcMain.handle('schedule:fetch', async (evt, cinemaIds?: unknown): Promise<ScheduleResponse> => {
+  // Validation boundary: the renderer is our own code, but its messages are
+  // still untrusted input (review IPC-01) — malformed payload = rejected
+  // whole request, not a shrug-and-continue.
+  if (!isKnownRendererSender(evt)) {
+    log.schedule.warn('[schedule:fetch] rejected unknown sender webContents');
+    throw new Error('schedule:fetch: unexpected sender');
+  }
+  const cinemaIdParse = parseCinemaIdsInput(cinemaIds);
+  if (!cinemaIdParse.ok) {
+    log.schedule.warn(`[schedule:fetch] rejected: ${cinemaIdParse.reason}`);
+    throw new Error(`schedule:fetch: ${cinemaIdParse.reason}`);
+  }
   const enabled =
-    cinemaIds && cinemaIds.length > 0 ? CINEMAS.filter((c) => cinemaIds.includes(c.id)) : CINEMAS;
+    cinemaIdParse.value.length > 0 ? CINEMAS.filter((c) => cinemaIdParse.value.includes(c.id)) : CINEMAS;
 
   const t0 = Date.now();
 
@@ -311,10 +362,26 @@ ipcMain.handle(
 ipcMain.handle(
   'ratings:retry',
   async (
-    _evt,
+    evt,
     moviesFromRenderer: unknown,
   ): Promise<{ retried: number; succeeded: number; stillFailing: number }> => {
-    if (!Array.isArray(moviesFromRenderer)) {
+    // Validation boundary (review IPC-01): the renderer passes its CURRENT
+    // displayed list; it cannot be trusted as typed data. Parse + sanitize
+    // (whitelist fields, caps, id patterns, known-cinema ids) — and
+    // importantly the RETRY ITSELF reads the real identifiers from the
+    // server-side ids_cache (by QID) below, so a forged payload cannot
+    // smuggle fake ids into any fetch.
+    if (!isKnownRendererSender(evt)) {
+      log.enricher.warn('[ratings:retry] rejected unknown sender webContents');
+      return { retried: 0, succeeded: 0, stillFailing: 0 };
+    }
+    const parsed = parseRetryMoviesInput(
+      moviesFromRenderer,
+      new Set(CINEMAS.map((c) => c.id)),
+      defaultSanitizeString,
+    );
+    if (!parsed.ok) {
+      log.enricher.warn(`[ratings:retry] rejected: ${parsed.reason}`);
       return { retried: 0, succeeded: 0, stillFailing: 0 };
     }
 
@@ -322,10 +389,10 @@ ipcMain.handle(
     // into the main bundle at startup.
     const { retryFailedLookups } = await import('./ratings/ratingsFetcher');
 
-    log.enricher.info(`[ratings:retry] received ${moviesFromRenderer.length} movies from renderer`);
+    log.enricher.info(`[ratings:retry] received ${parsed.value.length} valid movies from renderer`);
 
     return retryFailedLookups(
-      moviesFromRenderer as Movie[],
+      parsed.value as Movie[],
       (movie) => {
         // Same callback shape as the normal enrichment path — patches the
         // movie's ratings in the renderer state.
@@ -542,14 +609,29 @@ function createWindow() {
     });
     contents.on('will-navigate', (event, url) => {
       if (isAllowedFile(url)) return;
-      // Allow same-registrable-domain navigations (WAF/Cloudflare reloads).
-      const currentUrl = contents.getURL();
-      if (currentUrl && isSameRegistrableDomain(currentUrl, url)) return;
-      const isAllowedDev = allowedOrigins.has(safeOrigin(url));
-      if (!isAllowedDev) {
-        event.preventDefault();
-        log.schedule.warn(`[will-navigate] blocked in child contents: ${url}`);
+      // Review SEC-01: explicit allow-listed policy (not a hostname suffix
+      // heuristic). Applies to WAF/Cloudflare reloads (same registrable
+      // domain) and same-app cross-domain hops (e.g. cinema site →
+      // allocine.fr inside the ratings browserFetch flow)…
+      const decision = isChildNavigationAllowed(contents.getURL(), url, navigationAllowList);
+      if (decision.allowed) {
+        log.browserFetch.debug(`[will-navigate] child nav allowed: ${decision.reason}`);
+        return;
       }
+      // …and to the dev origins (only in dev).
+      if (allowedOrigins.has(safeOrigin(url))) return;
+      event.preventDefault();
+      log.schedule.warn(`[will-navigate] blocked in child contents: ${url} (${decision.reason})`);
+    });
+    // Redirects are a separate navigation boundary — revalidate them too
+    // (review SEC-01: "revalidate redirects at every navigation boundary").
+    contents.on('will-redirect', (event, url) => {
+      if (isAllowedFile(url)) return;
+      const decision = isChildNavigationAllowed(contents.getURL(), url, navigationAllowList);
+      if (decision.allowed) return;
+      if (allowedOrigins.has(safeOrigin(url))) return;
+      event.preventDefault();
+      log.schedule.warn(`[will-redirect] blocked in child contents: ${url} (${decision.reason})`);
     });
   });
 
@@ -568,14 +650,14 @@ function createWindow() {
   // window-all-closed doesn't fire (which can happen on macOS when
   // the app has hidden BrowserWindows from the browserFetch pool).
   mainWindow.on('closed', () => {
-    console.error('[main] mainWindow closed event');
+    log.shutdown.warn('[main] mainWindow closed event');
     doShutdown('mainWindow-closed');
   });
 
   // Also catch the close button BEFORE the window is destroyed —
   // this fires when the user clicks the red close button.
   mainWindow.on('close', () => {
-    console.error('[main] mainWindow close event');
+    log.shutdown.debug('[main] mainWindow close event');
   });
 }
 
@@ -588,25 +670,12 @@ function safeOrigin(url: string): string {
   }
 }
 
-/** Returns true if `url` is on the same registrable domain as `referenceUrl`.
- *  Used to allow WAF/Cloudflare reloads (which navigate to the same domain)
- *  while still blocking cross-origin navigations. */
-function isSameRegistrableDomain(referenceUrl: string, url: string): boolean {
-  try {
-    const refHost = new URL(referenceUrl).hostname;
-    const targetHost = new URL(url).hostname;
-    return (
-      targetHost === refHost ||
-      targetHost.endsWith('.' + refHost) ||
-      refHost.endsWith('.' + targetHost)
-    );
-  } catch {
-    return false;
-  }
-}
-
 app.whenReady().then(() => {
   initLogging(process.env.ARVE_DEBUG === '1');
+
+  // REVIEW-SEC-01: build the child-window navigation allow-list from the
+  // current registry (builtin + custom) before any hidden windows are used.
+  rebuildNavigationAllowList();
 
   // Register user-authored custom cinemas (userData/custom-cinemas.json)
   // before any window exists — the renderer's first cinemas:list call then
@@ -667,7 +736,9 @@ function doShutdown(reason: string): void {
   try {
     gracefulShutdown();
   } catch (err) {
-    console.error(`[shutdown] ${reason} — graceful path failed: ${err}`);
+    // Exit path: the flush may already have failed — stderr is the last
+    // channel that still works. Allowed by the console audit via marker.
+    console.error(`[shutdown] ${reason} — graceful path failed: ${err}`); // logging:exit-path
   }
   // gracefulShutdown ends in process.exit(0); if it somehow returned, force.
   process.exit(0);
@@ -695,42 +766,42 @@ app.on('before-quit', (event) => {
 //   4. To force kill: `kill -9 <pid>`
 
 if (process.env.ARVE_DEBUG === '1') {
-  console.error(`[main] process PID: ${process.pid}`);
+  console.error(`[main] process PID: ${process.pid}`); // logging:exit-path (debug diagnostics go to stderr only)
 
   process.on('SIGUSR2', () => {
-    console.error('\n=== SIGUSR2 — dumping state ===');
-    console.error(`PID: ${process.pid}`);
-    console.error(`isShuttingDown: ${isShuttingDown}`);
-    console.error(`\n=== Stack ===\n${new Error().stack}`);
+    console.error('\n=== SIGUSR2 — dumping state ==='); // logging:exit-path
+    console.error(`PID: ${process.pid}`); // logging:exit-path
+    console.error(`isShuttingDown: ${isShuttingDown}`); // logging:exit-path
+    console.error(`\n=== Stack ===\n${new Error().stack}`); // logging:exit-path
 
     try {
       // @ts-ignore
       const handles = process._getActiveHandles?.() ?? [];
-      console.error(`\n=== Active handles: ${handles.length} ===`);
+      console.error(`\n=== Active handles: ${handles.length} ===`); // logging:exit-path
       for (const h of handles) {
         const name = h.constructor?.name ?? 'unknown';
         const detail = name === 'Socket' ? ` ${(h as any).remoteAddress ?? ''}:${(h as any).remotePort ?? ''} destroyed=${(h as any).destroyed}` :
                        name === 'WriteStream' ? ` path=${(h as any).path ?? ''}` :
                        name === 'Server' ? ` connections=${(h as any)._connections ?? 0}` :
                        '';
-        console.error(`  ${name}${detail}`);
+        console.error(`  ${name}${detail}`); // logging:exit-path
       }
       // @ts-ignore
       const requests = process._getActiveRequests?.() ?? [];
-      console.error(`\n=== Active requests: ${requests.length} ===`);
+      console.error(`\n=== Active requests: ${requests.length} ===`); // logging:exit-path
       for (const r of requests) {
-        console.error(`  ${r.constructor?.name ?? 'unknown'}`);
+        console.error(`  ${r.constructor?.name ?? 'unknown'}`); // logging:exit-path
       }
     } catch (e) {
-      console.error(`dump failed: ${e}`);
+      console.error(`dump failed: ${e}`); // logging:exit-path
     }
 
-    console.error('\n=== End dump ===\n');
+    console.error('\n=== End dump ===\n'); // logging:exit-path
   });
 }
 
 // Catch uncaught errors that might prevent shutdown
 process.on('uncaughtException', (err) => {
-  console.error('[uncaughtException]', err);
+  console.error('[uncaughtException]', err); // logging:exit-path (logger state may be the crash cause)
   doShutdown('uncaughtException');
 });
