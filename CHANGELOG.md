@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.15.0 (2026-10-17)
 
 ### Features
 - **Release automation + auto-update** — new `.github/workflows/release.yml`: pushing a `v*` tag (or manual dispatch) builds the macOS arm64 dmg on a native runner (Electron ABI rebuild included) and uploads `.dmg` + `.blockmap` + `latest-mac.yml` as a draft GitHub Release. `electron-updater` wired in `src/main/updater.ts` against that feed: packaged builds check for updates at startup + daily, auto-download, install on quit or after a user dialog click; dev/fixture runs (`ARVE_REPLAY`, `ARVE_RECORD`) never touch the feed. Detection/notify works today; actually installing requires the signed/notarized build (Apple Developer ID, still user-gated) — the unsigned-build failure is logged informatively, never fatal. Update status exposed via `getUpdateStatus()` for a future About-panel badge.
