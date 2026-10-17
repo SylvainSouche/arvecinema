@@ -1,10 +1,18 @@
 // ──────────────────────────────────────────────────────────────────────────
 // Internationalization (i18n) — all UI strings in one place.
 //
+// Translation data lives in per-language JSON files next to this module
+// (fr.json, en.json) so non-dev contributors can edit strings without
+// touching TypeScript. The key list below (KEYS) is the SINGLE SOURCE OF
+// TRUTH for the key set: the TranslationKey union is derived from it via
+// `typeof KEYS[number]`, and a runtime completeness check asserts both
+// JSON files define every key (fails loudly in tests, falls back to the
+// key string in production — never crashes the UI).
+//
 // To add a new language:
 //   1. Add a key to the `Locale` type
-//   2. Add a translations object to `TRANSLATIONS`
-//   3. Set the default locale (or read from localStorage at startup)
+//   2. Create an <locale>.json file in src/shared/i18n/
+//   3. Register it in TRANSLATIONS_SOURCES + VALID_LOCALES below
 //
 // Usage in components:
 //   import { t, useLocale } from '../../shared/i18n';
@@ -16,316 +24,185 @@
 // ──────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useCallback } from 'react';
+import frTable from './i18n/fr.json';
+import enTable from './i18n/en.json';
 
 export type Locale = 'fr' | 'en';
 
+/** All translation keys. Adding a key here without adding it to
+ *  fr.json/en.json fails the i18n contract test (test/shared/i18nContract.test.ts). */
+export const KEYS = [
+  // ── App shell / filters / sort ─────────────────────────────────────────
+  'appTitle',
+  'loading',
+  'error',
+  'noResults',
+  'noShowtimes',
+  'allCinemas',
+  'cinema',
+  'allDays',
+  'allVersions',
+  'vf',
+  'vo',
+  'hourRange',
+  'sortBy',
+  'sort_nextScreening',
+  'sort_title',
+  'sort_cinema',
+  'dayView',
+  'weekView',
+  'refresh',
+  'refreshTooltip',
+  'themeToggle_dark',
+  'themeToggle_light',
+  'updated',
+  'films',
+  'film',
+  'cinemas',
+  'cinema_singular',
+  'week',
+  'realization',
+  'with_',
+  'noPoster',
+  'noRatingsFound',
+  'screen',
+  'version',
+  'unspecified',
+  'minutes',
+  'pressRating',
+  'audienceRating',
+  'votes',
+  'vote',
+  'imdbRating',
+  'ratingLabel',
+  'openImdb',
+  'openAllocine',
+  'openRt',
+  'certifiedFresh',
+  'rottenTomatoes',
+  'ratingAbsent',
+  'ratingBlocked',
+  'ratingPending',
+  'retryFailed',
+  'retryFailedTooltip',
+  'retryInProgress',
+  'retryDone',
+  'searchPlaceholder',
+  'today',
+  'language',
+  'french',
+  'english',
+  'noSessions',
+  // ── Generic UI labels (shared across components) ───────────────────────
+  'clear',
+  'export',
+  'autoScroll',
+  'allComponents',
+  'filterMessages',
+  'noLogEntries',
+  'logAll',
+  'minHour',
+  'maxHour',
+  // ── Error boundary ──────────────────────────────────────────────────────
+  'errorBoundaryTitle',
+  'errorBoundaryMessage',
+  'reload',
+  // ── Cinema status banner ────────────────────────────────────────────────
+  'cinemaStatus_timeout',
+  'cinemaStatus_http-error',
+  'cinemaStatus_parse-error',
+  'cinemaUnavailable',
+  // ── Progress bar ────────────────────────────────────────────────────────
+  'ratingsProgress',
+  // ── Diagnostics panel ───────────────────────────────────────────────────
+  'diagnostics',
+  'diagnosticsTitle',
+  'diagnosticsCinemas',
+  'diagnosticsRatingSources',
+  'diagnosticsBlockedFilms',
+  'diagnosticsCopy',
+  'diagnosticsCopied',
+  'diagnosticsReportIssue',
+  'diagnosticsNoBlocked',
+  'diagnosticsNetworkActive',
+  'diagnosticsNetworkIdle',
+  'diagnosticsMoviesLoaded',
+  'diagnosticsLastLogs',
+  // ── About panel ─────────────────────────────────────────────────────────
+  'about',
+  'aboutTitle',
+  'close',
+  'aboutLicense',
+  'aboutLicenseIntro',
+  'aboutDependencies',
+  'aboutDependenciesIntro',
+  'aboutAttributions',
+  'aboutPersonalUse',
+  'aboutPersonalUseDescription',
+  'aboutImdbDescription',
+  'aboutWikidataDescription',
+  // ── Custom cinemas settings ─────────────────────────────────────────────
+  'customCinemasTab',
+  'customCinemasTitle',
+  'customCinemasHint',
+  'customCinemasEmpty',
+  'customCinemasAdd',
+  'customCinemasRemove',
+  'customCinemasSave',
+  'customCinemasSaved',
+  'customCinemasSaveError',
+  'customCinemaName',
+  'customCinemaCity',
+  'customCinemaColor',
+  'customCinemaKind',
+  'customCinemaBaseUrl',
+  'customCinemaTheaterId',
+  'customCinemasRegistered',
+] as const;
+
+/** Translation table keys, derived from KEYS (single source of truth). */
+export type TranslationKey = (typeof KEYS)[number];
+
+type Translation = { fr: string; en: string };
+const UNKNOWN_TABLE_KEYS = new Set<string>();
+
+/** Per-language string tables (JSON, editable by non-devs). */
+const TABLES: Record<Locale, Record<string, string>> = {
+  fr: frTable as Record<string, string>,
+  en: enTable as Record<string, string>,
+};
+
+/** Build the merged TRANSLATIONS table from the JSON sources. Missing keys
+ *  (key in KEYS but absent from a JSON file) are recorded in
+ *  UNKNOWN_TABLE_KEYS so tests can fail loudly, while the runtime fallback
+ *  chain in t() keeps the UI functional (renders the key string). */
+function buildTranslations(): Partial<Record<TranslationKey, Translation>> {
+  const merged: Partial<Record<TranslationKey, Translation>> = {};
+  for (const key of KEYS) {
+    const fr = TABLES.fr[key];
+    const en = TABLES.en[key];
+    if (fr === undefined || en === undefined) {
+      UNKNOWN_TABLE_KEYS.add(key);
+      continue;
+    }
+    merged[key] = { fr, en };
+  }
+  return merged;
+}
+
+export const TRANSLATIONS: Partial<Record<TranslationKey, Translation>> = buildTranslations();
+
+/** Keys declared in KEYS but missing from at least one locale file — must
+ *  be empty in a healthy tree. Exported for the contract test. */
+export function missingTranslationKeys(): string[] {
+  return [...UNKNOWN_TABLE_KEYS];
+}
+
+/** Locale JSON files that exist — for the language picker + tests. */
+export const VALID_LOCALES: readonly Locale[] = ['fr', 'en'];
+
 export const DEFAULT_LOCALE: Locale = 'fr';
 const STORAGE_KEY = 'arvecinema-locale';
-
-/** Translation table. Each key maps to { fr: string, en: string }. */
-export type TranslationKey =
-  | 'appTitle'
-  | 'loading'
-  | 'error'
-  | 'noResults'
-  | 'noShowtimes'
-  | 'allCinemas'
-  | 'cinema'
-  | 'allDays'
-  | 'allVersions'
-  | 'vf'
-  | 'vo'
-  | 'hourRange'
-  | 'sortBy'
-  | 'sort_nextScreening'
-  | 'sort_title'
-  | 'sort_cinema'
-  | 'dayView'
-  | 'weekView'
-  | 'refresh'
-  | 'refreshTooltip'
-  | 'themeToggle_dark'
-  | 'themeToggle_light'
-  | 'updated'
-  | 'films'
-  | 'film'
-  | 'cinemas'
-  | 'cinema_singular'
-  | 'week'
-  | 'realization'
-  | 'with_'
-  | 'noPoster'
-  | 'noRatingsFound'
-  | 'screen'
-  | 'version'
-  | 'unspecified'
-  | 'minutes'
-  | 'pressRating'
-  | 'audienceRating'
-  | 'votes'
-  | 'vote'
-  | 'imdbRating'
-  | 'ratingLabel'
-  | 'openImdb'
-  | 'openAllocine'
-  | 'openRt'
-  | 'certifiedFresh'
-  | 'rottenTomatoes'
-  | 'ratingAbsent'
-  | 'ratingBlocked'
-  | 'ratingPending'
-  | 'retryFailed'
-  | 'retryFailedTooltip'
-  | 'retryInProgress'
-  | 'retryDone'
-  | 'searchPlaceholder'
-  | 'today'
-  | 'language'
-  | 'french'
-  | 'english'
-  | 'noSessions'
-  // ── Generic UI labels (shared across components) ───────────────────────
-  | 'clear'
-  | 'export'
-  | 'autoScroll'
-  | 'allComponents'
-  | 'filterMessages'
-  | 'noLogEntries'
-  | 'logAll'
-  | 'minHour'
-  | 'maxHour'
-  // ── Error boundary ───────────────────────────────────────────────────
-  | 'errorBoundaryTitle'
-  | 'errorBoundaryMessage'
-  | 'reload'
-  // ── Cinema status banner ──────────────────────────────────────────────
-  | 'cinemaStatus_timeout'
-  | 'cinemaStatus_http-error'
-  | 'cinemaStatus_parse-error'
-  | 'cinemaUnavailable'
-  // ── Progress bar ──────────────────────────────────────────────────────
-  | 'ratingsProgress'
-  // ── Diagnostics panel ──────────────────────────────────────────────────
-  | 'diagnostics'
-  | 'diagnosticsTitle'
-  | 'diagnosticsCinemas'
-  | 'diagnosticsRatingSources'
-  | 'diagnosticsBlockedFilms'
-  | 'diagnosticsCopy'
-  | 'diagnosticsCopied'
-  | 'diagnosticsReportIssue'
-  | 'diagnosticsNoBlocked'
-  | 'diagnosticsNetworkActive'
-  | 'diagnosticsNetworkIdle'
-  | 'diagnosticsMoviesLoaded'
-  | 'diagnosticsLastLogs'
-  // ── About panel ────────────────────────────────────────────────────────
-  | 'about'
-  | 'aboutTitle'
-  | 'close'
-  | 'aboutLicense'
-  | 'aboutLicenseIntro'
-  | 'aboutDependencies'
-  | 'aboutDependenciesIntro'
-  | 'aboutAttributions'
-  | 'aboutPersonalUse'
-  | 'aboutPersonalUseDescription'
-  | 'aboutImdbDescription'
-  | 'aboutWikidataDescription'
-  // ── Custom cinemas settings ─────────────────────────────────────────────
-  | 'customCinemasTab'
-  | 'customCinemasTitle'
-  | 'customCinemasHint'
-  | 'customCinemasEmpty'
-  | 'customCinemasAdd'
-  | 'customCinemasRemove'
-  | 'customCinemasSave'
-  | 'customCinemasSaved'
-  | 'customCinemasSaveError'
-  | 'customCinemaName'
-  | 'customCinemaCity'
-  | 'customCinemaColor'
-  | 'customCinemaKind'
-  | 'customCinemaBaseUrl'
-  | 'customCinemaTheaterId'
-  | 'customCinemasRegistered';
-
-type Translations = Record<TranslationKey, { fr: string; en: string }>;
-
-export const TRANSLATIONS: Translations = {
-  appTitle: { fr: 'ArveCinema', en: 'ArveCinema' },
-  loading: { fr: 'Chargement des séances…', en: 'Loading showtimes…' },
-  error: { fr: 'Erreur', en: 'Error' },
-  noResults: { fr: 'Aucun film ne correspond à ces filtres.', en: 'No films match these filters.' },
-  noShowtimes: { fr: 'Aucune séance dans cette plage.', en: 'No showtimes in this range.' },
-  allCinemas: { fr: 'Tous', en: 'All' },
-  cinema: { fr: 'Cinéma', en: 'Cinema' },
-  allDays: { fr: 'Tous les jours', en: 'All days' },
-  allVersions: { fr: 'Tous', en: 'All' },
-  vf: { fr: 'VF', en: 'VF' },
-  vo: { fr: 'VO', en: 'VO' },
-  hourRange: { fr: 'Horaire', en: 'Time' },
-  sortBy: { fr: 'Trier', en: 'Sort' },
-  sort_nextScreening: { fr: 'Prochaine séance', en: 'Next screening' },
-  sort_title: { fr: 'Titre', en: 'Title' },
-  sort_cinema: { fr: 'Cinéma', en: 'Cinema' },
-  dayView: { fr: 'Jour', en: 'Day' },
-  weekView: { fr: 'Semaine', en: 'Week' },
-  refresh: { fr: 'Actualiser', en: 'Refresh' },
-  refreshTooltip: { fr: 'Actualiser les séances', en: 'Refresh showtimes' },
-  themeToggle_dark: { fr: 'Passer en thème clair', en: 'Switch to light theme' },
-  themeToggle_light: { fr: 'Passer en thème sombre', en: 'Switch to dark theme' },
-  updated: { fr: 'Mis à jour à', en: 'Updated at' },
-  films: { fr: 'films', en: 'films' },
-  film: { fr: 'film', en: 'film' },
-  cinemas: { fr: 'cinémas', en: 'cinemas' },
-  cinema_singular: { fr: 'cinéma', en: 'cinema' },
-  week: { fr: 'semaine', en: 'week' },
-  realization: { fr: 'Réalisation', en: 'Director' },
-  with_: { fr: 'Avec', en: 'Cast' },
-  noPoster: { fr: "Pas d'affiche", en: 'No poster' },
-  noRatingsFound: {
-    fr: "Wikidata n'a pas trouvé ce film — pas de notes disponibles",
-    en: 'Wikidata did not find this film — no ratings available',
-  },
-  screen: { fr: 'Salle', en: 'Screen' },
-  version: { fr: 'Version', en: 'Version' },
-  unspecified: { fr: 'Non spécifié', en: 'Not specified' },
-  minutes: { fr: 'min', en: 'min' },
-  pressRating: { fr: 'Presse', en: 'Press' },
-  audienceRating: { fr: 'Spectateurs', en: 'Audience' },
-  votes: { fr: 'votes', en: 'votes' },
-  vote: { fr: 'vote', en: 'vote' },
-  imdbRating: { fr: 'IMDB', en: 'IMDB' },
-  ratingLabel: { fr: 'Note', en: 'Rating' },
-  openImdb: { fr: 'Cliquez pour ouvrir la fiche IMDB', en: 'Click to open IMDB page' },
-  openAllocine: { fr: 'Cliquez pour ouvrir la fiche AlloCiné', en: 'Click to open AlloCiné page' },
-  openRt: { fr: 'Cliquez pour ouvrir la fiche RT', en: 'Click to open RT page' },
-  certifiedFresh: { fr: '🍅 Certified Fresh', en: '🍅 Certified Fresh' },
-  rottenTomatoes: { fr: 'Rotten Tomatoes', en: 'Rotten Tomatoes' },
-  ratingAbsent: { fr: 'Pas de note sur cette source', en: 'No rating on this source' },
-  ratingBlocked: { fr: 'Échec de récupération', en: 'Fetch failed' },
-  ratingPending: { fr: 'Récupération en cours…', en: 'Fetching…' },
-  retryFailed: { fr: 'Réessayer les notes', en: 'Retry ratings' },
-  retryFailedTooltip: {
-    fr: 'Re-tenter les notes échouées (Cloudflare, erreurs réseau)',
-    en: 'Retry failed rating lookups (Cloudflare, network errors)',
-  },
-  retryInProgress: { fr: 'Nouvel essai en cours…', en: 'Retry in progress…' },
-  retryDone: {
-    fr: '{recovered} récupérée(s) sur {retried}',
-    en: '{recovered} of {retried} recovered',
-  },
-  searchPlaceholder: {
-    fr: 'Rechercher : titre, réalisateur, acteur…',
-    en: 'Search: title, director, actor…',
-  },
-  today: { fr: "Aujourd'hui", en: 'Today' },
-  language: { fr: 'Langue', en: 'Language' },
-  french: { fr: 'Français', en: 'French' },
-  english: { fr: 'Anglais', en: 'English' },
-  noSessions: { fr: 'Aucune séance dans cette plage.', en: 'No showtimes in this range.' },
-
-  // ── Generic UI labels (shared across components) ──────────────────────────
-  clear: { fr: 'Effacer', en: 'Clear' },
-  export: { fr: 'Exporter', en: 'Export' },
-  autoScroll: { fr: 'Défilement auto', en: 'Auto-scroll' },
-  allComponents: { fr: 'Tous les composants', en: 'All components' },
-  filterMessages: { fr: 'Filtrer les messages…', en: 'Filter messages…' },
-  noLogEntries: { fr: 'Aucune entrée de log', en: 'No log entries' },
-  logAll: { fr: 'Tous', en: 'All' },
-  minHour: { fr: 'Heure minimum', en: 'Minimum hour' },
-  maxHour: { fr: 'Heure maximum', en: 'Maximum hour' },
-
-  // ── Error boundary ──────────────────────────────────────────────────────────
-  errorBoundaryTitle: { fr: 'Une erreur est survenue', en: 'An error occurred' },
-  errorBoundaryMessage: {
-    fr: "L'application a rencontré un problème inattendu. Essayez de la recharger.",
-    en: 'The application encountered an unexpected problem. Try reloading it.',
-  },
-  reload: { fr: 'Recharger', en: 'Reload' },
-
-  // ── Cinema status banner ───────────────────────────────────────────────────
-  cinemaStatus_timeout: { fr: 'délai dépassé', en: 'timed out' },
-  'cinemaStatus_http-error': { fr: 'erreur HTTP', en: 'HTTP error' },
-  'cinemaStatus_parse-error': { fr: 'format du site modifié', en: 'site format changed' },
-  cinemaUnavailable: {
-    fr: 'programmation temporairement indisponible',
-    en: 'schedule temporarily unavailable',
-  },
-
-  // ── Progress bar ───────────────────────────────────────────────────────────
-  ratingsProgress: { fr: 'Notes : {resolved}/{total}', en: 'Ratings: {resolved}/{total}' },
-
-  // ── Diagnostics panel ──────────────────────────────────────────────────────
-  diagnostics: { fr: 'Diagnostics', en: 'Diagnostics' },
-  diagnosticsTitle: { fr: 'Diagnostics', en: 'Diagnostics' },
-  diagnosticsCinemas: { fr: 'Cinéma', en: 'Cinemas' },
-  diagnosticsRatingSources: { fr: 'Sources de notes', en: 'Rating sources' },
-  diagnosticsBlockedFilms: { fr: 'Films bloqués', en: 'Blocked films' },
-  diagnosticsCopy: { fr: 'Copier les diagnostics', en: 'Copy diagnostics' },
-  diagnosticsCopied: { fr: 'Copié !', en: 'Copied!' },
-  diagnosticsReportIssue: { fr: 'Signaler un problème', en: 'Report issue' },
-  diagnosticsNoBlocked: { fr: 'Aucun film bloqué', en: 'No blocked films' },
-  diagnosticsNetworkActive: { fr: 'Réseau actif', en: 'Network active' },
-  diagnosticsNetworkIdle: { fr: 'Réseau inactif', en: 'Network idle' },
-  diagnosticsMoviesLoaded: { fr: '{count} films chargés', en: '{count} movies loaded' },
-  diagnosticsLastLogs: { fr: 'Dernières entrées de log', en: 'Last log entries' },
-
-  // ── About panel ────────────────────────────────────────────────────────────
-  about: { fr: 'À propos', en: 'About' },
-  aboutTitle: { fr: "À propos d'ArveCinema", en: 'About ArveCinema' },
-  close: { fr: 'Fermer', en: 'Close' },
-  aboutLicense: { fr: 'Licence', en: 'License' },
-  aboutLicenseIntro: {
-    fr: 'Ce logiciel est distribué sous la licence BSD 3-Clause. Voir le fichier',
-    en: 'This software is distributed under the BSD 3-Clause license. See the',
-  },
-  aboutDependencies: { fr: 'Bibliothèques utilisées', en: 'Used software' },
-  aboutDependenciesIntro: {
-    fr: "ArveCinema s'appuie sur les logiciels open-source suivants :",
-    en: 'ArveCinema relies on the following open-source software:',
-  },
-  aboutAttributions: { fr: 'Informations', en: 'Information' },
-  aboutPersonalUse: { fr: 'Application de navigation personnelle', en: 'Personal navigation app' },
-  aboutPersonalUseDescription: {
-    fr: "ArveCinema est une application de navigation personnelle permettant de consulter les horaires de séances des cinémas de la vallée de l'Arve. Les horaires proviennent directement des sites web des cinémas. Les notes et métadonnées affichées sont obtenues à des fins d'information personnelle et non commerciale. Aucune donnée n'est rediffusée ni revendue.",
-    en: 'ArveCinema is a personal navigation app for browsing cinema showtimes in the Arve Valley. Showtimes are fetched directly from cinema websites. Ratings and metadata displayed are retrieved for personal, non-commercial informational purposes only. No data is republished or sold.',
-  },
-  aboutImdbDescription: {
-    fr: 'Notes IMDB issues du jeu de données public officiel (title.ratings.tsv.gz), téléchargé quotidiennement depuis datasets.imdbws.com.',
-    en: 'IMDB ratings sourced from the official public dataset (title.ratings.tsv.gz), downloaded daily from datasets.imdbws.com.',
-  },
-  aboutWikidataDescription: {
-    fr: 'Correspondances titre → ID IMDB résolues via les identifiants Wikidata (P345). Données sous licence CC0.',
-    en: 'Title → IMDB ID resolution via Wikidata identifiers (P345). Data released under CC0.',
-  },
-  customCinemasTab: { fr: 'Cinémas', en: 'Cinemas' },
-  customCinemasTitle: { fr: 'Mes cinemas', en: 'My cinemas' },
-  customCinemasHint: {
-    fr: "Ajoutez vos propres cinémas. Chaque cinéma distant doit être équipé du même CMS que l'une des technologies listées. Fichier : userData/custom-cinemas.json.",
-    en: 'Add your own cinemas. Each remote cinema must run one of the listed CMS technologies. File: userData/custom-cinemas.json.',
-  },
-  customCinemasEmpty: { fr: 'Aucun cinema personnalisé pour le moment.', en: 'No custom cinemas yet.' },
-  customCinemasAdd: { fr: '+ Ajouter', en: '+ Add' },
-  customCinemasRemove: { fr: 'Supprimer', en: 'Remove' },
-  customCinemasSave: { fr: 'Enregistrer', en: 'Save' },
-  customCinemasSaved: { fr: 'Enregistré ✔', en: 'Saved ✔' },
-  customCinemasSaveError: { fr: 'Certains cinémas sont invalides', en: 'Some cinemas are invalid' },
-  customCinemaName: {
-    fr: 'Nom (ex. Cinéma Megève)',
-    en: 'Name (e.g. Cinéma Megève)',
-  },
-  customCinemaCity: { fr: 'Ville (ex. Megève)', en: 'City (e.g. Megève)' },
-  customCinemaColor: { fr: 'Couleur', en: 'Color' },
-  customCinemaKind: { fr: 'Technologie', en: 'Technology' },
-  customCinemaBaseUrl: { fr: 'URL du site (https://…)', en: 'Website URL (https://…)' },
-  customCinemaTheaterId: { fr: 'ID cinéma (boxofficeapi)', en: 'Theater ID (boxofficeapi)' },
-  customCinemasRegistered: {
-    fr: 'Enregistrés au démarrage — modifiés maintenant ? Enregistrer pour appliquer.',
-    en: 'Registered — edited now? Save to apply.',
-  },
-};
 
 // ── Locale storage ─────────────────────────────────────────────────────────
 

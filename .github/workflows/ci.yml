@@ -1,7 +1,8 @@
 # CI - runs on every PR and push to master.
 #
 # Jobs:
-#   1. lint-and-test - typecheck + vitest unit tests + smoke tests
+#   1. lint-and-test - typecheck + vitest unit tests (incl. i18n + logging
+#      contract tests) + build
 #   2. e2e-replay    - Playwright E2E against the recorded network fixture
 #                      (no live cinema-site traffic for recorded URLs)
 #   3. build         - electron-vite build (verifies the app compiles)
@@ -41,12 +42,6 @@ jobs:
 
       - name: Run unit tests
         run: npm test
-
-      - name: Run i18n smoke test
-        run: node scripts/smoke-test-i18n.mjs
-
-      - name: Run logger smoke test
-        run: node scripts/smoke-test-logger.mjs
 
   e2e-replay:
     name: E2E (replay fixture)

@@ -44,7 +44,7 @@
 
 ### Internationalisation
 
-- [x] **i18n completeness audit** — 102 translation keys, all with FR + EN. Zero hardcoded UI strings (verified by `smoke-test-i18n.mjs`).
+- [x] **i18n completeness audit** — 118 translation keys (fr.json + en.json, contributor-editable), all with FR + EN. Zero hardcoded UI strings (verified by `test/shared/i18nContract.test.ts`).
 - [x] **Fallback chain** — `t()`: `currentLocale → DEFAULT_LOCALE (fr) → key string`
 - [x] **Parameter substitution** — `tFmt(key, { param: value })` for dynamic strings
 - [x] **Locale-aware number formatting** — `formatDecimal()` (comma in FR, dot in EN)
@@ -71,7 +71,7 @@
   - [x] Custom cinemas: file-based registration + invalid-entry isolation + **settings UI flow** (add via form → save → live registry refresh) + form validation error state
 - [x] **Replay-based E2E in CI** — `test/fixtures/network-capture.json` (80 responses, 3.3 MB) recorded headlessly with `node scripts/record-replay-fixture.cjs`. `npm run test:e2e:replay` runs the full e2e suite against the fixture (17s vs 47s live, no live cinema-site traffic for recorded URLs). Bodies > 512 KB (IMDB dataset, big Wikidata batches) fall through to the real network via partial replay. CI job `e2e-replay` runs it on every push/PR.
 - [x] **Shutdown coordinator restored** — `doShutdown` had regressed to a bare `SIGKILL`, silently skipping DB close, log flush AND the fixture save; `gracefulShutdown()` was dead code + its `require()`s could never resolve in the built bundle (wrong relative paths, invisible to typecheck). Now static imports: `[network-recorder] saved 84 recorded responses` actually runs again.
-- [x] **CI workflow** — GitHub Actions: typecheck + 307 unit tests + smoke checks + replay e2e + build on every PR/push
+- [x] **CI workflow** — GitHub Actions: typecheck + unit tests (incl. i18n + logging contract tests) + replay e2e + build on every PR/push
 - [x] **TESTING.md** — comprehensive testing strategy mapping 15 failure modes to 6 test layers
 - [x] **ERROR_HANDLING.md** — documents the user-feedback loop + error categories
 - [x] **Coverage headers** — every test file has a header explaining what it catches/misses
