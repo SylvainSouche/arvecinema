@@ -4,8 +4,11 @@ import { app, BrowserWindow, ipcMain, nativeImage, shell, Menu, screen } from 'e
 import path from 'path';
 
 import { CINEMAS, getCinemaInfos, loadCustomCinemas } from './cinemas/registry';
+import { readCustomCinemasFile, saveCustomCinemas } from './cinemas/customCinemasIpc';
+import { listPlugins } from './cinemas/adapters';
 import type { Movie, ScheduleResponse, CinemaStatus } from './cinemas/types';
 import { enrichWithRatings } from './ratings/ratingsEnricher';
+import { gracefulShutdown } from './ratings/shutdown';
 import { getNetworkActive } from '../shared/networkActivity';
 import { initLogging, getAllLogs, clearLogs } from './ratings/logger';
 import { log } from './ratings/moduleLoggers';
@@ -14,6 +17,14 @@ import { log } from './ratings/moduleLoggers';
  *  cache.db). Loaded at startup; re-loadable via `cinemas:reload-custom`. */
 function customCinemasFile(): string {
   return path.join(app.getPath('userData'), 'custom-cinemas.json');
+}
+
+/** Notify every renderer that the registry changed (custom cinemas loaded/
+ *  saved via IPC) so they refetch the cinema list + schedule. */
+function notifyCinemasChanged(): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send('cinemas:changed');
+  }
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -37,13 +48,33 @@ const ALLOWED_PROTOCOLS = new Set(['https:']);
 
 ipcMain.handle('cinemas:list', () => getCinemaInfos());
 
-// ── IPC: re-read the userData custom-cinemas.json and re-register ──────────
+// ── IPC: custom-cinemas settings UI support ────────────────────────────────
 //
-// Lets power users (and a future settings UI) add/remove cinemas without
-// restarting the app. Returns the same structured result the startup load
-// produces — { registered, errors } — so the caller can surface rejections.
+// Lets the renderer read, edit and re-register the user's custom cinemas
+// (userData/custom-cinemas.json). The I/O + registration logic lives in
+// customCinemasIpc.ts (electron-free, unit-tested); these handlers are thin.
 
-ipcMain.handle('cinemas:reload-custom', () => loadCustomCinemas(customCinemasFile()));
+/** Read the raw file for the settings form (missing/malformed → empty). */
+ipcMain.handle('cinemas:read-custom', () => readCustomCinemasFile(customCinemasFile()));
+
+/** Persist the editor's list and re-register it. Returns written + reload
+ *  result ({ registered, errors }) so the UI can display rejections. */
+ipcMain.handle('cinemas:save-custom', (_evt, entries: unknown) => {
+  const result = saveCustomCinemas(customCinemasFile(), entries);
+  notifyCinemasChanged();
+  return result;
+});
+
+/** Adapter kinds available for the form's select. Metadata only. */
+ipcMain.handle('cinemas:plugin-kinds', () => listPlugins());
+
+/** Re-read the file from disk and re-register (power users editing the
+ *  JSON manually; equivalent to save with the file's own content). */
+ipcMain.handle('cinemas:reload-custom', () => {
+  const result = loadCustomCinemas(customCinemasFile());
+  notifyCinemasChanged();
+  return result;
+});
 
 // ── IPC: fetch schedule for a subset of cinemas (default: all) ──────────────
 //
@@ -614,14 +645,13 @@ app.on('activate', () => {
 
 // ── Shutdown ────────────────────────────────────────────────────────────────
 //
-// On macOS, closing the last window fires `window-all-closed`. On all
-// platforms, Cmd+Q / Alt+F4 fires `before-quit`.
-//
-// We handle BOTH with the same simple logic:
+// Driver for the gracefaul shutdown coordinator (src/main/ratings/shutdown.ts):
 //   1. Signal background workers to stop (cancellation flag)
 //   2. Destroy all BrowserWindows (kills hidden browserFetch windows)
 //   3. Close SQLite DB (flushes WAL)
-//   4. process.exit(0) — immediate, no waiting for in-flight HTTP
+//   4. Flush logs
+//   5. Save the replayable network fixture (ARVE_RECORD mode)
+//   6. process.exit(0) — immediate, no waiting for in-flight HTTP
 
 let isShuttingDown = false;
 
@@ -629,12 +659,13 @@ function doShutdown(reason: string): void {
   if (isShuttingDown) return;
   isShuttingDown = true;
 
-  // Absolute bare minimum: just kill the process.
-  // No require(), no cleanup, no diagnostics — those can all throw
-  // or hang. The OS will reclaim resources (file handles, sockets,
-  // SQLite WAL) when the process dies.
-  console.error(`[shutdown] ${reason} — killing process ${process.pid}`);
-  process.kill(process.pid, 'SIGKILL');
+  try {
+    gracefulShutdown();
+  } catch (err) {
+    console.error(`[shutdown] ${reason} — graceful path failed: ${err}`);
+  }
+  // gracefulShutdown ends in process.exit(0); if it somehow returned, force.
+  process.exit(0);
 }
 
 app.on('window-all-closed', () => {

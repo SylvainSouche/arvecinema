@@ -85,9 +85,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   /** Get all captured log entries from the main process. */
   getLogs: () => ipcRenderer.invoke('log:get-all'),
-
   /** Clear the log buffer in the main process. */
   clearLogs: () => ipcRenderer.invoke('log:clear'),
+
+  /** Custom cinemas settings (userData/custom-cinemas.json):
+   *  read raw entries for the form; save (write + re-register); list the
+   *  registered adapter kinds; subscribe to registry change events. */
+  readCustomCinemas: () => ipcRenderer.invoke('cinemas:read-custom'),
+  saveCustomCinemas: (entries: unknown[]) => ipcRenderer.invoke('cinemas:save-custom', entries),
+  listPluginKinds: () => ipcRenderer.invoke('cinemas:plugin-kinds'),
+  reloadCustomCinemas: () => ipcRenderer.invoke('cinemas:reload-custom'),
+  onCinemasChanged: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('cinemas:changed', handler);
+    return () => ipcRenderer.removeListener('cinemas:changed', handler);
+  },
 
   /** Subscribe to real-time log entries from the main process.
    *  Each entry has { timestamp, level, component, message } where

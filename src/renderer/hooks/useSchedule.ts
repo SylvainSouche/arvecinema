@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Movie, CinemaInfo, CinemaStatus } from '../../shared/types';
-import { fetchCinemas, fetchSchedule } from '../api/cinemaApi';
+import { fetchCinemas, fetchSchedule, onCinemasChanged } from '../api/cinemaApi';
 import { todayIso } from '../../shared/cinema';
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -71,6 +71,21 @@ export function useSchedule(selectedCinemaIds: string[]): {
   }, [selectedCinemaIds]);
 
   useEffect(() => reload(), [reload]);
+
+  // React to registry changes (custom cinemas saved/reloaded in the main
+  // process): refetch the cinema list and the schedule so new cinemas appear
+  // without a restart. Registry source: 'cinemas:changed' IPC via preload.
+  useEffect(() => {
+    const unsubscribe = onCinemasChanged(() => {
+      fetchCinemas()
+        .then(setCinemas)
+        .catch(() => {
+          /* non-fatal */
+        });
+      reload();
+    });
+    return unsubscribe;
+  }, [reload]);
 
   return {
     movies,

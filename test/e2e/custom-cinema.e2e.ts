@@ -72,3 +72,56 @@ test('an invalid custom entry is rejected with the builtins unaffected', async (
   // The invalid entry carries no pill (its id/name never existed).
   expect(await app.page.locator('button', { hasText: 'broken-entry' }).count()).toBe(0);
 });
+
+// ── Settings UI flow (About panel → Cinemas tab) ───────────────────────────
+
+test('adding a custom cinema through the settings UI registers it live', async () => {
+  const app = await launchApp();
+  cleanup = app.cleanup;
+
+  // Open About panel → Cinemas tab.
+  await app.page.waitForSelector('h1', { timeout: 30_000 });
+  await app.page.getByLabel(/À propos|About/).click(); // the ℹ header button
+  const cinemasTab = app.page.getByTestId('about-tab-cinemas');
+  await expect(cinemasTab).toBeVisible({ timeout: 10_000 });
+  await cinemasTab.click();
+
+  // Fill the form with a valid entry.
+  await app.page.getByTestId('custom-cinemas-add').click();
+  await app.page.getByTestId('custom-cinema-kind-0').selectOption('example');
+  await app.page.getByTestId('custom-cinema-name-0').fill('Custom E2E UI');
+  await app.page.getByTestId('custom-cinema-city-0').fill('E2E');
+  await app.page.getByTestId('custom-cinema-baseurl-0').fill('https://example.com');
+
+  // Save → main re-registers → 'cinemas:changed' → the cinema list refreshes.
+  await app.page.getByTestId('custom-cinemas-save').click();
+  await expect(app.page.getByTestId('custom-cinemas-status')).toHaveText(/Saved|Enregistré/, {
+    timeout: 10_000,
+  });
+
+  // Close the panel; the new cinema pill must be live without any restart.
+  await app.page.keyboard.press('Escape');
+  const customPill = app.page.locator('button', { hasText: 'Custom E2E UI' });
+  await expect(customPill).toBeVisible({ timeout: 15_000 });
+});
+
+test('the settings form rejects rows with missing required fields', async () => {
+  const app = await launchApp();
+  cleanup = app.cleanup;
+
+  await app.page.waitForSelector('h1', { timeout: 30_000 });
+  await app.page.getByLabel(/À propos|About/).click();
+  const cinemasTab = app.page.getByTestId('about-tab-cinemas');
+  await expect(cinemasTab).toBeVisible({ timeout: 10_000 });
+  await cinemasTab.click();
+
+  // Add an empty row and try to save — must NOT claim success.
+  await app.page.getByTestId('custom-cinemas-add').click();
+  await app.page.getByTestId('custom-cinemas-save').click();
+  await expect(app.page.getByTestId('custom-cinemas-status')).toHaveText(/invalid|invalides/, {
+    timeout: 10_000,
+  });
+
+  // Nothing was registered: no invalid pill, form stays in error state.
+  expect(await app.page.locator('button', { hasText: 'cinema e2e' }).count()).toBe(0);
+});

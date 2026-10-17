@@ -4,6 +4,7 @@ import { openTicket } from '../api/cinemaApi';
 import type { Movie } from '../types';
 import type { CinemaInfo, CinemaStatus } from '../../shared/types';
 import { LogViewer } from './LogViewer';
+import { CustomCinemasEditor } from './CustomCinemasEditor';
 
 // ──────────────────────────────────────────────────────────────────────────
 // AboutPanel — modal overlay with tabbed navigation:
@@ -24,7 +25,7 @@ interface AboutPanelProps {
   networkActive: boolean;
 }
 
-type Tab = 'about' | 'logs' | 'export' | 'diagnostics';
+type Tab = 'about' | 'logs' | 'export' | 'diagnostics' | 'cinemas';
 
 const DEPENDENCIES: Array<{ name: string; license: string; url: string }> = [
   { name: 'better-sqlite3', license: 'MIT', url: 'https://github.com/WiseLibs/better-sqlite3' },
@@ -317,6 +318,13 @@ export const AboutPanel: React.FC<AboutPanelProps> = ({
           </button>
           <button style={tabBtnStyle(tab === 'diagnostics')} onClick={() => setTab('diagnostics')}>
             🩺 {t('diagnostics')}
+          </button>
+          <button
+            data-testid="about-tab-cinemas"
+            style={tabBtnStyle(tab === 'cinemas')}
+            onClick={() => setTab('cinemas')}
+          >
+            🎬 {t('customCinemasTab')}
           </button>
           <div style={{ flex: 1 }} />
           <button
@@ -680,6 +688,8 @@ export const AboutPanel: React.FC<AboutPanelProps> = ({
               networkActive={networkActive}
             />
           )}
+
+          {tab === 'cinemas' && <CustomCinemasEditor />}
         </div>
       </div>
       <style>{`@keyframes arve-about-fade { from { opacity: 0; } to { opacity: 1; } }`}</style>

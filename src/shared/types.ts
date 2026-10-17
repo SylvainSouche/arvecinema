@@ -236,6 +236,24 @@ declare global {
           message: string;
         }) => void,
       ) => () => void;
+      /** Custom cinemas settings (userData/custom-cinemas.json). */
+      readCustomCinemas: () => Promise<{ path: string; exists: boolean; cinemas: unknown[] }>;
+      /** Write the editor's list + re-register. Returns { written, reload:
+       *  { registered, errors } }. Fires 'cinemas:changed' on success. */
+      saveCustomCinemas: (entries: unknown[]) => Promise<{
+        written: boolean;
+        reload: { registered: string[]; errors: Array<{ entry: string; message: string }> };
+      }>;
+      /** Registered adapter kinds for the form's kind select. */
+      listPluginKinds: () => Promise<Array<{ id: string; displayName: string; description?: string }>>;
+      /** Re-read the file from disk + re-register. Same result as save. */
+      reloadCustomCinemas: () => Promise<{
+        registered: string[];
+        errors: Array<{ entry: string; message: string }>;
+      }>;
+      /** Fires when the registry changed (save/reload-custom) — refetch
+       *  the cinema list + schedule. Returns unsubscribe function. */
+      onCinemasChanged: (callback: () => void) => () => void;
     };
   }
 }

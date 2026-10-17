@@ -131,7 +131,24 @@ export type TranslationKey =
   | 'aboutPersonalUse'
   | 'aboutPersonalUseDescription'
   | 'aboutImdbDescription'
-  | 'aboutWikidataDescription';
+  | 'aboutWikidataDescription'
+  // ── Custom cinemas settings ─────────────────────────────────────────────
+  | 'customCinemasTab'
+  | 'customCinemasTitle'
+  | 'customCinemasHint'
+  | 'customCinemasEmpty'
+  | 'customCinemasAdd'
+  | 'customCinemasRemove'
+  | 'customCinemasSave'
+  | 'customCinemasSaved'
+  | 'customCinemasSaveError'
+  | 'customCinemaName'
+  | 'customCinemaCity'
+  | 'customCinemaColor'
+  | 'customCinemaKind'
+  | 'customCinemaBaseUrl'
+  | 'customCinemaTheaterId'
+  | 'customCinemasRegistered';
 
 type Translations = Record<TranslationKey, { fr: string; en: string }>;
 
@@ -282,6 +299,31 @@ export const TRANSLATIONS: Translations = {
   aboutWikidataDescription: {
     fr: 'Correspondances titre → ID IMDB résolues via les identifiants Wikidata (P345). Données sous licence CC0.',
     en: 'Title → IMDB ID resolution via Wikidata identifiers (P345). Data released under CC0.',
+  },
+  customCinemasTab: { fr: 'Cinémas', en: 'Cinemas' },
+  customCinemasTitle: { fr: 'Mes cinemas', en: 'My cinemas' },
+  customCinemasHint: {
+    fr: "Ajoutez vos propres cinémas. Chaque cinéma distant doit être équipé du même CMS que l'une des technologies listées. Fichier : userData/custom-cinemas.json.",
+    en: 'Add your own cinemas. Each remote cinema must run one of the listed CMS technologies. File: userData/custom-cinemas.json.',
+  },
+  customCinemasEmpty: { fr: 'Aucun cinema personnalisé pour le moment.', en: 'No custom cinemas yet.' },
+  customCinemasAdd: { fr: '+ Ajouter', en: '+ Add' },
+  customCinemasRemove: { fr: 'Supprimer', en: 'Remove' },
+  customCinemasSave: { fr: 'Enregistrer', en: 'Save' },
+  customCinemasSaved: { fr: 'Enregistré ✔', en: 'Saved ✔' },
+  customCinemasSaveError: { fr: 'Certains cinémas sont invalides', en: 'Some cinemas are invalid' },
+  customCinemaName: {
+    fr: 'Nom (ex. Cinéma Megève)',
+    en: 'Name (e.g. Cinéma Megève)',
+  },
+  customCinemaCity: { fr: 'Ville (ex. Megève)', en: 'City (e.g. Megève)' },
+  customCinemaColor: { fr: 'Couleur', en: 'Color' },
+  customCinemaKind: { fr: 'Technologie', en: 'Technology' },
+  customCinemaBaseUrl: { fr: 'URL du site (https://…)', en: 'Website URL (https://…)' },
+  customCinemaTheaterId: { fr: 'ID cinéma (boxofficeapi)', en: 'Theater ID (boxofficeapi)' },
+  customCinemasRegistered: {
+    fr: 'Enregistrés au démarrage — modifiés maintenant ? Enregistrer pour appliquer.',
+    en: 'Registered — edited now? Save to apply.',
   },
 };
 
