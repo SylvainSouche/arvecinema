@@ -21,28 +21,39 @@ import path from 'node:path';
 
 const read = (rel: string): string => fs.readFileSync(path.join(process.cwd(), rel), 'utf8');
 
-describe('security contract: IPC validation boundary wired in main', () => {
+describe('security contract: IPC validation boundary wired in the registrar', () => {
+  // The channels moved out of index.ts into services/ipcRegistrar.ts
+  // (ARCH-01); the boundary behavior is pinned there.
+  const registrar = () => read('src/main/services/ipcRegistrar.ts');
   const index = () => read('src/main/index.ts');
 
-  it('schedule:fetch validates cinemaIds through the parse boundary', () => {
+  it('the registrar is wired from index.ts (composition root calls it once)', () => {
     const s = index();
+    expect(s).toMatch(/registerIpcHandlers\(\{/);
+    expect(s).not.toMatch(/ipcMain\.handle\(/); // no channel registrations left in index
+  });
+
+  it('schedule:fetch validates cinemaIds through the parse boundary', () => {
+    const s = registrar();
     expect(s).toMatch(/parseCinemaIdsInput\(cinemaIds\)/);
+    expect(s).toMatch(/!cinemaIdParse\.ok/);
     // the filter must consume the PARSED value, never the raw parameter
     expect(s).toMatch(/cinemaIdParse\.value\.includes\(c\.id\)/);
     expect(s).not.toMatch(/cinemaIds\.includes/);
   });
 
   it('ratings:retry validates + sanitizes the movie array (no raw casts)', () => {
-    const s = index();
+    const s = registrar();
     expect(s).toMatch(/parseRetryMoviesInput\(/);
     expect(s).toMatch(/parsed\.ok/);
     expect(s).toMatch(/parsed\.value/);
+    expect(s).toMatch(/retryBlockedLookups\(parsed\.value/); // service owns the orchestration
     // The old blind cast must not come back.
     expect(s).not.toMatch(/moviesFromRenderer as Movie\[\]/);
   });
 
   it('privileged handlers reject unknown senders (webContents check)', () => {
-    const s = index();
+    const s = registrar();
     expect(s).toMatch(/function isKnownRendererSender\(/);
     // Guard must be called in both handlers that consume input that
     // triggers network work…

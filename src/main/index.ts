@@ -1,34 +1,30 @@
 import './tz'; // MUST be first — sets process.env.TZ before any Date construction (BUG-04)
 
-import { app, BrowserWindow, ipcMain, nativeImage, shell, Menu, screen } from 'electron';
+import { app, BrowserWindow, nativeImage, Menu, screen } from 'electron';
 import path from 'path';
 
-import { CINEMAS, getCinemaInfos, loadCustomCinemas } from './cinemas/registry';
-import { readCustomCinemasFile, saveCustomCinemas } from './cinemas/customCinemasIpc';
-import { listPlugins } from './cinemas/adapters';
-import type { Movie, ScheduleResponse, CinemaStatus } from './cinemas/types';
-import { enrichWithRatings } from './ratings/ratingsEnricher';
+import { CINEMAS, loadCustomCinemas } from './cinemas/registry';
+import { buildAllowedChildDomains, isChildNavigationAllowed } from './navigationPolicy';
+import { registerIpcHandlers } from './services/ipcRegistrar';
 import { gracefulShutdown } from './ratings/shutdown';
 import { maybeInitAutoUpdater } from './updater';
-import {
-  buildAllowedChildDomains,
-  isChildNavigationAllowed,
-} from './navigationPolicy';
-import {
-  parseCinemaIdsInput,
-  parseRetryMoviesInput,
-  defaultSanitizeString,
-} from './security/ipcValidation';
-import { createRefreshSequence } from '../shared/refreshToken';
-
-// Refresh-generation sequence (review race fix): a schedule:fetch starts a
-// new generation; enrichment broadcasts from superseded runs are suppressed
-// at the enricher (isStale) so a slow older run can never overwrite the
-// latest schedule state in the renderer.
-const refreshSeq = createRefreshSequence();
-import { getNetworkActive } from '../shared/networkActivity';
-import { initLogging, getAllLogs, clearLogs } from './ratings/logger';
+import { initLogging } from './ratings/logger';
 import { log } from './ratings/moduleLoggers';
+
+// ──────────────────────────────────────────────────────────────────────────
+// index.ts — composition root (ARCH-01).
+//
+// Everything request-shaped lives in services/:
+//   - services/ipcRegistrar.ts      → IPC channels (sender checks + parse
+//                                     boundaries) → scheduleService /
+//                                     ratingsCoordinator
+//   - services/scheduleService.ts   → schedule orchestration (tested)
+//   - services/ratingsCoordinator.ts→ ratings-retry orchestration (tested)
+//   - services/ratingUpdates.ts     → rating:updated payload (tested)
+// Everything viewport-shaped stays in windowSecurity HERE (this file):
+//   window creation, navigation policy wiring (navigationPolicy.ts), the
+//   child allow-list, permission denial and app lifecycle/shutdown.
+// ──────────────────────────────────────────────────────────────────────────
 
 /** Path of the user-editable custom cinema registry (in userData, next to
  *  cache.db). Loaded at startup; re-loadable via `cinemas:reload-custom`. */
@@ -47,10 +43,9 @@ function notifyCinemasChanged(): void {
   rebuildNavigationAllowList();
 }
 
-// ── Child-window navigation max allow-list (navigationPolicy.ts) ──────────
-// REVIEW-SEC-01: replace the old suffix-hostname heuristic with an explicit
-// allow-list, rebuilt whenever the cinema registry changes (custom cinemas
-// may point at new domains).
+// ── Child-window navigation allow-list (navigationPolicy.ts) ──────────────
+// REVIEW-SEC-01: explicit PSL allow-list, rebuilt whenever the cinema
+// registry changes (custom cinemas may point at new domains).
 
 let navigationAllowList: ReadonlySet<string> = buildAllowedChildDomains([]);
 
@@ -66,18 +61,7 @@ function rebuildNavigationAllowList(): void {
   );
 }
 
-/** Grep-proofed sender check: accept privileged operations only from
- *  webContents this app actually created (the main renderer, log viewer
- *  windows, devtools…). Anything else (e.g. a webview injected later) is
- *  rejected. */
-function isKnownRendererSender(evt: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): boolean {
-  return BrowserWindow.getAllWindows().some((w) => w.webContents === evt.sender);
-}
-
 // ── Constants ──────────────────────────────────────────────────────────────
-
-/** How many days from today the schedule fetcher should ask each cinema for. */
-const SCHEDULE_WINDOW_DAYS = 14;
 
 /** Default window dimensions — comfortable for the week grid + sidebar.
  *  Will be clamped to the screen's work area (see createWindow below). */
@@ -88,412 +72,12 @@ const DEFAULT_WINDOW_HEIGHT = 900;
 const MIN_WINDOW_WIDTH = 900;
 const MIN_WINDOW_HEIGHT = 600;
 
-/** Allowed protocols for ticketing URLs opened via `shell.openExternal`. */
-const ALLOWED_PROTOCOLS = new Set(['https:']);
-
-// ── IPC: list available cinemas (metadata only — no adapter function leak) ──
-
-ipcMain.handle('cinemas:list', () => getCinemaInfos());
-
-// ── IPC: custom-cinemas settings UI support ────────────────────────────────
-//
-// Lets the renderer read, edit and re-register the user's custom cinemas
-// (userData/custom-cinemas.json). The I/O + registration logic lives in
-// customCinemasIpc.ts (electron-free, unit-tested); these handlers are thin.
-
-/** Read the raw file for the settings form (missing/malformed → empty). */
-ipcMain.handle('cinemas:read-custom', () => readCustomCinemasFile(customCinemasFile()));
-
-/** Persist the editor's list and re-register it. Returns written + reload
- *  result ({ registered, errors }) so the UI can display rejections. */
-ipcMain.handle('cinemas:save-custom', (_evt, entries: unknown) => {
-  const result = saveCustomCinemas(customCinemasFile(), entries);
-  notifyCinemasChanged();
-  return result;
-});
-
-/** Adapter kinds available for the form's select. Metadata only. */
-ipcMain.handle('cinemas:plugin-kinds', () => listPlugins());
-
-/** Re-read the file from disk and re-register (power users editing the
- *  JSON manually; equivalent to save with the file's own content). */
-ipcMain.handle('cinemas:reload-custom', () => {
-  const result = loadCustomCinemas(customCinemasFile());
-  notifyCinemasChanged();
-  return result;
-});
-
-// ── IPC: fetch schedule for a subset of cinemas (default: all) ──────────────
-//
-// CMB-005: we now track per-cinema status so the renderer can distinguish
-// "no screenings this week" from "cinema server unreachable". Without this
-// distinction the UI would silently present an empty cinema as if it had
-// nothing scheduled.
-
-ipcMain.handle('schedule:fetch', async (evt, cinemaIds?: unknown): Promise<ScheduleResponse> => {
-  // Validation boundary: the renderer is our own code, but its messages are
-  // still untrusted input (review IPC-01) — malformed payload = rejected
-  // whole request, not a shrug-and-continue.
-  if (!isKnownRendererSender(evt)) {
-    log.schedule.warn('[schedule:fetch] rejected unknown sender webContents');
-    throw new Error('schedule:fetch: unexpected sender');
-  }
-  const cinemaIdParse = parseCinemaIdsInput(cinemaIds);
-  if (!cinemaIdParse.ok) {
-    log.schedule.warn(`[schedule:fetch] rejected: ${cinemaIdParse.reason}`);
-    throw new Error(`schedule:fetch: ${cinemaIdParse.reason}`);
-  }
-  const enabled =
-    cinemaIdParse.value.length > 0 ? CINEMAS.filter((c) => cinemaIdParse.value.includes(c.id)) : CINEMAS;
-
-  const t0 = Date.now();
-
-  // New refresh generation — from here on, any still-running older
-  // schedule:fetch's enrichment broadcasts are considered stale.
-  const gen = refreshSeq.next();
-
-  // Fetch each cinema in parallel and keep its individual status.
-  const results = await Promise.all(
-    enabled.map(
-      async (
-        c,
-      ): Promise<{
-        status: CinemaStatus;
-        availableDays: string[];
-        movies: Movie[];
-      }> => {
-        try {
-          const r = await c.adapter.fetchSchedule(SCHEDULE_WINDOW_DAYS);
-          return {
-            status: { cinemaId: c.id, status: 'ok' },
-            availableDays: r.availableDays,
-            movies: r.movies,
-          };
-        } catch (err) {
-          const reason =
-            err instanceof Error && err.name === 'TimeoutError'
-              ? 'timeout'
-              : err instanceof Error && err.name === 'ScraperSchemaChangedError'
-                ? 'parse-error'
-                : 'http-error';
-          const message = err instanceof Error ? err.message : String(err);
-          log.schedule.error(`[cinemas] ${c.id} failed (${reason}): ${message}`);
-          return {
-            status: { cinemaId: c.id, status: reason, error: message },
-            availableDays: [],
-            movies: [],
-          };
-        }
-      },
-    ),
-  );
-
-  const t1 = Date.now();
-  const movieCount = results.reduce((n, r) => n + r.movies.length, 0);
-  if (process.env.ARVE_DEBUG === '1') {
-    log.schedule.info(
-      `[schedule] fetched ${enabled.length} cinemas, ${movieCount} movies in ${t1 - t0}ms`,
-    );
-  }
-
-  // Union of available days (sorted, deduplicated).
-  const daySet = new Set<string>();
-  for (const r of results) for (const d of r.availableDays) daySet.add(d);
-  const availableDays = [...daySet].sort();
-
-  // Concatenate all movies — keep one Movie entry per (cinema, film) so each
-  // cinema's showtimes are clearly grouped under their own card.
-  //
-  // UX-03: previously concatenated per-cinema in registry order, producing
-  // three alphabetised runs back to back. Now sort globally by title, with
-  // cinemaId as the tiebreaker so the same film at two cinemas appears
-  // adjacent.
-  const movies = results
-    .flatMap((r) => r.movies)
-    .sort((a, b) => {
-      const t = a.title.localeCompare(b.title, 'fr', { sensitivity: 'base' });
-      return t !== 0 ? t : a.cinemaId.localeCompare(b.cinemaId);
-    });
-
-  // Per-cinema status list (rendered in the UI as a warning banner).
-  const cinemaStatuses: CinemaStatus[] = results.map((r) => r.status);
-
-  // Progressive ratings: return movies immediately WITHOUT ratings,
-  // then enrich in the background. As each movie is enriched, a
-  // `rating:updated` IPC event is sent to the renderer so the UI
-  // updates progressively.
-  //
-  // Refresh-generation guard: enrichWithRatings stops broadcasting (both
-  // rating:updated via its guarded onUpdated, and ratings:progress via the
-  // shared isStale check) the moment a newer schedule:fetch supersedes this
-  // generation — a slow older run cannot overwrite the newest data.
-  enrichWithRatings(
-    movies,
-    (movie) => {
-      // Send the updated movie to all renderer windows.
-      for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send('rating:updated', {
-          cinemaId: movie.cinemaId,
-          movieId: movie.id,
-          ratings: {
-            imdbId: movie.imdbId,
-            imdbRating: movie.imdbRating,
-            imdbVotes: movie.imdbVotes,
-            imdbUrl: movie.imdbUrl,
-            imdbStatus: movie.imdbStatus,
-            imdbStatusMessage: movie.imdbStatusMessage,
-            allocinePress: movie.allocinePress,
-            allocineAudience: movie.allocineAudience,
-            allocineVotes: movie.allocineVotes,
-            allocineUrl: movie.allocineUrl,
-            allocineStatus: movie.allocineStatus,
-            allocineStatusMessage: movie.allocineStatusMessage,
-            rtTomatometer: movie.rtTomatometer,
-            rtCertifiedFresh: movie.rtCertifiedFresh,
-            rtUrl: movie.rtUrl,
-            rtStatus: movie.rtStatus,
-            rtStatusMessage: movie.rtStatusMessage,
-            wikidataUrl: movie.wikidataUrl,
-          },
-        });
-      }
-    },
-    { isStale: () => !refreshSeq.isCurrent(gen) },
-  );
-
-  // enrichWithRatings runs Phase 0 synchronously (cached ratings applied
-  // to movie objects in-place) before returning. So by the time we
-  // reach this line, any cached ratings are already on the movie objects
-  // that we're about to return to the renderer.
-  const t2 = Date.now();
-  const moviesWithImdb = movies.filter((m) => m.imdbRating !== undefined).length;
-  const moviesWithAc = movies.filter(
-    (m) => m.allocinePress !== undefined || m.allocineAudience !== undefined,
-  ).length;
-  const moviesWithRt = movies.filter((m) => m.rtTomatometer !== undefined).length;
-  if (process.env.ARVE_DEBUG === '1') {
-    log.schedule.info(
-      `[schedule] Phase 0 cache applied in ${t2 - t1}ms: ` +
-        `${moviesWithImdb}/${movies.length} IMDB, ${moviesWithAc}/${movies.length} AC, ${moviesWithRt}/${movies.length} RT ` +
-        `(total since fetch start: ${t2 - t0}ms)`,
-    );
-  }
-
-  return { availableDays, movies, cinemaStatuses };
-});
-
-// ── IPC (DEV-ONLY): export ALL movies from ALL cinemas ─────────────────────
-//
-// Fetches schedules from ALL 4 cinemas (ignoring the UI's cinema selector),
-// waits for ratings enrichment to complete, then returns the full movie list.
-// Used by the dev-only JSON export button to dump everything — not just the
-// currently-displayed (filtered/selected) subset.
-//
-// Disabled in packaged builds.
-
-ipcMain.handle(
-  'dev:export-all',
-  async (): Promise<{ movies: Movie[]; cinemaStatuses: CinemaStatus[] }> => {
-    if (app.isPackaged) {
-      return { movies: [], cinemaStatuses: [] };
-    }
-
-    // Fetch ALL cinemas (ignore selection).
-    const results = await Promise.all(
-      CINEMAS.map(async (c) => {
-        try {
-          const r = await c.adapter.fetchSchedule(SCHEDULE_WINDOW_DAYS);
-          return { status: { cinemaId: c.id, status: 'ok' as const }, movies: r.movies };
-        } catch (err) {
-          const reason =
-            err instanceof Error && err.name === 'TimeoutError'
-              ? 'timeout'
-              : err instanceof Error && err.name === 'ScraperSchemaChangedError'
-                ? 'parse-error'
-                : 'http-error';
-          const message = err instanceof Error ? err.message : String(err);
-          log.schedule.error(`[dev:export-all] ${c.id} failed (${reason}): ${message}`);
-          return {
-            status: { cinemaId: c.id, status: reason as CinemaStatus['status'], error: message },
-            movies: [],
-          };
-        }
-      }),
-    );
-
-    const movies = results
-      .flatMap((r) => r.movies)
-      .sort((a, b) => {
-        const t = a.title.localeCompare(b.title, 'fr', { sensitivity: 'base' });
-        return t !== 0 ? t : a.cinemaId.localeCompare(b.cinemaId);
-      });
-
-    const cinemaStatuses = results.map((r) => r.status);
-
-    // Enrich with ratings (same callback as the normal schedule:fetch path).
-    // Unlike the normal path, we AWAIT enrichment to complete before returning
-    // — the export button should show the full ratings, not partial results.
-    await enrichWithRatings(movies, (movie) => {
-      for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send('rating:updated', {
-          cinemaId: movie.cinemaId,
-          movieId: movie.id,
-          ratings: {
-            imdbId: movie.imdbId,
-            imdbRating: movie.imdbRating,
-            imdbVotes: movie.imdbVotes,
-            imdbUrl: movie.imdbUrl,
-            imdbStatus: movie.imdbStatus,
-            imdbStatusMessage: movie.imdbStatusMessage,
-            allocinePress: movie.allocinePress,
-            allocineAudience: movie.allocineAudience,
-            allocineVotes: movie.allocineVotes,
-            allocineUrl: movie.allocineUrl,
-            allocineStatus: movie.allocineStatus,
-            allocineStatusMessage: movie.allocineStatusMessage,
-            rtTomatometer: movie.rtTomatometer,
-            rtCertifiedFresh: movie.rtCertifiedFresh,
-            rtUrl: movie.rtUrl,
-            rtStatus: movie.rtStatus,
-            rtStatusMessage: movie.rtStatusMessage,
-            wikidataUrl: movie.wikidataUrl,
-          },
-        });
-      }
-    });
-
-    return { movies, cinemaStatuses };
-  },
-);
-
-// ── IPC: retry failed rating lookups ────────────────────────────────────────
-//
-// CMB-012: when the user clicks the "Retry failed lookups" button in the UI,
-// the renderer sends the list of movies currently displayed (with their
-// wikidataUrl + current rating statuses). The main process scans this list
-// for movies with `status === 'blocked'` and re-fetches ONLY those sources
-// (IMDB dataset, AlloCiné, RT), ignoring the freshness TTL.
-//
-// As each source's fetch completes, a `rating:updated` IPC event is sent to
-// all renderer windows — the same path used by the normal enrichment pipeline.
-// The renderer doesn't need to track the retry result; it just sees rating
-// updates flow in.
-
-ipcMain.handle(
-  'ratings:retry',
-  async (
-    evt,
-    moviesFromRenderer: unknown,
-  ): Promise<{ retried: number; succeeded: number; stillFailing: number }> => {
-    // Validation boundary (review IPC-01): the renderer passes its CURRENT
-    // displayed list; it cannot be trusted as typed data. Parse + sanitize
-    // (whitelist fields, caps, id patterns, known-cinema ids) — and
-    // importantly the RETRY ITSELF reads the real identifiers from the
-    // server-side ids_cache (by QID) below, so a forged payload cannot
-    // smuggle fake ids into any fetch.
-    if (!isKnownRendererSender(evt)) {
-      log.enricher.warn('[ratings:retry] rejected unknown sender webContents');
-      return { retried: 0, succeeded: 0, stillFailing: 0 };
-    }
-    const parsed = parseRetryMoviesInput(
-      moviesFromRenderer,
-      new Set(CINEMAS.map((c) => c.id)),
-      defaultSanitizeString,
-    );
-    if (!parsed.ok) {
-      log.enricher.warn(`[ratings:retry] rejected: ${parsed.reason}`);
-      return { retried: 0, succeeded: 0, stillFailing: 0 };
-    }
-
-    // Lazy-load the retry function to avoid pulling the whole fetcher module
-    // into the main bundle at startup.
-    const { retryFailedLookups } = await import('./ratings/ratingsFetcher');
-
-    log.enricher.info(`[ratings:retry] received ${parsed.value.length} valid movies from renderer`);
-
-    return retryFailedLookups(
-      parsed.value as Movie[],
-      (movie) => {
-        // Same callback shape as the normal enrichment path — patches the
-        // movie's ratings in the renderer state.
-        for (const win of BrowserWindow.getAllWindows()) {
-          win.webContents.send('rating:updated', {
-            cinemaId: movie.cinemaId,
-            movieId: movie.id,
-            ratings: {
-              imdbId: movie.imdbId,
-              imdbRating: movie.imdbRating,
-              imdbVotes: movie.imdbVotes,
-              imdbUrl: movie.imdbUrl,
-              imdbStatus: movie.imdbStatus,
-              imdbStatusMessage: movie.imdbStatusMessage,
-              allocinePress: movie.allocinePress,
-              allocineAudience: movie.allocineAudience,
-              allocineVotes: movie.allocineVotes,
-              allocineUrl: movie.allocineUrl,
-              allocineStatus: movie.allocineStatus,
-              allocineStatusMessage: movie.allocineStatusMessage,
-              rtTomatometer: movie.rtTomatometer,
-              rtCertifiedFresh: movie.rtCertifiedFresh,
-              rtUrl: movie.rtUrl,
-              rtStatus: movie.rtStatus,
-              rtStatusMessage: movie.rtStatusMessage,
-              wikidataUrl: movie.wikidataUrl,
-            },
-          });
-        }
-      },
-      () => {
-        // Progress callback — currently no-op. The renderer's ProgressBar
-        // is wired to the `ratings:progress` channel; if we want retries to
-        // show progress, we'd broadcast here. For now the count of blocked
-        // badges on screen decreases as each retry succeeds, which is
-        // already a good progress signal.
-      },
-    );
-  },
-);
-
-// ── IPC: open a ticketing URL in the user's default browser ─────────────────
-//
-// CMB-008: ticketing URLs come from remote cinema data and must be validated
-// before opening. We allow only HTTPS URLs to prevent `javascript:` or other
-// unexpected protocols. The URL is opened via `shell.openExternal` rather than
-// a renderer `<a target="_blank">` to keep navigation outside the sandboxed
-// renderer.
-
-// Return current network activity state (for late-subscribing renderers)
-ipcMain.handle('dev:get-network-state', () => {
-  return getNetworkActive();
-});
-
-// ── Log management IPC ───────────────────────────────────────────────────
-ipcMain.handle('log:get-all', () => {
-  return getAllLogs();
-});
-
-ipcMain.handle('log:clear', () => {
-  clearLogs();
-  return true;
-});
-
-
-ipcMain.handle('tickets:open', async (_evt, url: unknown): Promise<boolean> => {
-  if (typeof url !== 'string' || !url) return false;
-  try {
-    const parsed = new URL(url);
-    if (!ALLOWED_PROTOCOLS.has(parsed.protocol)) {
-      log.schedule.warn(`[tickets:open] rejected non-https URL: ${url}`);
-      return false;
-    }
-    await shell.openExternal(parsed.toString());
-    return true;
-  } catch (err) {
-    log.schedule.error(
-      `[tickets:open] invalid URL: ${url} ${err instanceof Error ? err.message : String(err)}`,
-    );
-    return false;
-  }
+// ── IPC registration (services/ipcRegistrar.ts) ────────────────────────────
+// All renderer-facing channels live there; this passes only the app-lifecycle
+// bits the registrar cannot know.
+registerIpcHandlers({
+  customCinemasFile,
+  notifyCinemasChanged,
 });
 
 // ── Window lifecycle ───────────────────────────────────────────────────────
@@ -615,7 +199,8 @@ function createWindow() {
   // Apply the same handlers to any future webContents (webviews, child windows,
   // AND hidden browserFetch/browserGraphqlFetch windows).
   //
-  // EXCEPTION: same-registrable-domain navigations are allowed, because:
+  // EXCEPTION: allow-listed navigations within/between the cinema+provider
+  // domains are allowed, because:
   //   - The AWS WAF challenge.js (loaded by imdb.com) calls
   //     window.location.reload(true) to apply the freshly-minted
   //     aws-waf-token cookie. Without this exception, that reload is
@@ -629,7 +214,7 @@ function createWindow() {
     });
     contents.on('will-navigate', (event, url) => {
       if (isAllowedFile(url)) return;
-      // Review SEC-01: explicit allow-listed policy (not a hostname suffix
+      // Review SEC-01: explicit allow-list policy (not a hostname suffix
       // heuristic). Applies to WAF/Cloudflare reloads (same registrable
       // domain) and same-app cross-domain hops (e.g. cinema site →
       // allocine.fr inside the ratings browserFetch flow)…
@@ -739,7 +324,7 @@ app.on('activate', () => {
 
 // ── Shutdown ────────────────────────────────────────────────────────────────
 //
-// Driver for the gracefaul shutdown coordinator (src/main/ratings/shutdown.ts):
+// Driver for the graceful shutdown coordinator (src/main/ratings/shutdown.ts):
 //   1. Signal background workers to stop (cancellation flag)
 //   2. Destroy all BrowserWindows (kills hidden browserFetch windows)
 //   3. Close SQLite DB (flushes WAL)

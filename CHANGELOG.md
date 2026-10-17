@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Security
+- **Child-window navigation policy (SEC-01)** — the old suffix-hostname heuristic for aux/browserFetch windows (`www.allocine.fr` could navigate to `https://fr/`; multi-label TLDs mistaken for parents) is replaced by `src/main/navigationPolicy.ts`: an explicit PSL-based allow-list (tldts) built from the rating-provider domains (allocine.fr, rottentomatoes.com, imdb.com — fixed, conscious policy) plus the registrable domains of every configured cinema baseUrl (rebuilt when custom cinemas change). Both sides of a navigation edge must be allow-listed; IP literals and non-http schemes are denied; HTTP redirects are revalidated at their own boundary (`will-redirect` guard).
+- **IPC validation boundary (IPC-01)** — every privileged main handler now parses rather than casts: `schedule:fetch` validates `cinemaIds` (shape, id pattern, size caps); `ratings:retry` replaces the `as Movie[]` blind cast with a whitelist sanitizer (bounded strings, control-char stripping, id patterns, known cinema ids only — real identifiers still come from the server-side ids_cache); both handlers reject webContents the app did not create.
+
+### Fixes
+- **Atomic custom-cinema persistence (DATA-02)** — `saveCustomCinemas` previously had a bare `writeFileSync` (a crash mid-write could truncate the JSON) and persisted structurally-broken entries as-is. Now the complete configuration is validated before anything is committed (a save with any malformed entry is rejected wholesale, previous bytes untouched), the write is fsync'd temp-file + atomic rename, a `.lkg` last-known-good backup is refreshed on success, and caps (≤50 entries, field lengths) bound the input.
+- **Refresh-generation race** — a slow older schedule refresh could win over a faster newer one on both sides of the IPC: the main process now opens a generation per `schedule:fetch` and the enricher suppresses broadcasts (`rating:updated`, progress meter even the reset) of superseded runs via an `isStale` gate; the renderer's `useSchedule` tokens every reload and discards late OLDER responses (the old per-closure `cancelled` flag was bypassed by `cinemas:changed` and the manual ↻ button). Deterministic guard semantics in `src/shared/refreshToken.ts`, unit-tested with explicit out-of-order interleavings.
+- **Console-audit blind spot** — the logging contract's string-stripping regexes silently swallowed matches (10 real `console.error` calls in `index.ts` were invisible to the audit). Replaced with a strict line-based scan; exit-path stderr dumps (shutdown failure, uncaughtException, SIGUSR2 debug) are allowed via an explicit `logging:exit-path` marker convention.
+
+### Refactoring
+- **Main-process orchestration extracted (ARCH-01)** — `index.ts` (827 → ~530 lines) is now a composition root: window security wiring + app lifecycle only. Request-shaped logic moved to testable services: `services/scheduleService.ts` (parallel fetch, error classification, global fr-title sort, availableDays union — all seams injected, no electron), `services/ratingsCoordinator.ts` (retry orchestration), `services/ratingUpdates.ts` (single source of truth for the `rating:updated` payload, ending three duplicated hand-written mappings), and `services/ipcRegistrar.ts` (the electron IPC boundary: sender checks + parse/sanitize → services). The IPC boundary behaviors are now actually executed in tests (mocked electron capture) instead of only source-audited.
+
+### Tests
+- Unit suite 356 → 425 (+ filling what audits used to fake): navigationPolicy (10), ipcValidation (9), securityContract (6), refreshToken (7), refreshGeneration (4), customCinemas atomicity (13), service layer (25 incl. the superseded-run suppression regression). Replay e2e 11/11 green; shared TZ pool config untouched (`vitest.config.ts`: `pool: forks` + `TZ=Europe/Paris` — do not decouple).
+- New runtime dependency: `tldts` (PSL, pure JS, bundled).
+
 ## v0.15.0 (2026-10-17)
 
 ### Features

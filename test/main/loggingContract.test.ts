@@ -172,11 +172,13 @@ describe('logging contract: wiring (source audit)', () => {
     expect(indexSrc()).toMatch(/initLogging\(process\.env\.ARVE_DEBUG === '1'\)/);
   });
 
-  it('log:get-all + log:clear IPC handlers registered in main/index.ts', () => {
-    expect(indexSrc()).toMatch(/ipcMain\.handle\('log:get-all'/);
-    expect(indexSrc()).toMatch(/ipcMain\.handle\('log:clear'/);
-    expect(indexSrc()).toMatch(/getAllLogs/);
-    expect(indexSrc()).toMatch(/clearLogs/);
+  it('log:get-all + log:clear IPC handlers registered in services/ipcRegistrar.ts', () => {
+    const registrarSrc = () =>
+      fs.readFileSync(path.join(process.cwd(), 'src/main/services/ipcRegistrar.ts'), 'utf8');
+    expect(registrarSrc()).toMatch(/ipcMain\.handle\('log:get-all'/);
+    expect(registrarSrc()).toMatch(/ipcMain\.handle\('log:clear'/);
+    expect(registrarSrc()).toMatch(/getAllLogs/);
+    expect(registrarSrc()).toMatch(/clearLogs/);
   });
 
   it('flushLogs called in the shutdown flow', () => {
