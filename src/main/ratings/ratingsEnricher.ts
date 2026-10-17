@@ -53,6 +53,10 @@ function incrementProgress(): void {
 }
 
 function broadcastProgress(): void {
+  // Refresh-generation guard (review race fix): a superseded enrichment run
+  // must not clobber the progress meter of the current run — especially
+  // resetProgress(0/stale-total) which would visibly rewind the bar.
+  if (progressStaleCheck?.()) return;
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send('ratings:progress', {
       resolved: progressResolved,
@@ -62,14 +66,40 @@ function broadcastProgress(): void {
   }
 }
 
+/** Staleness checker of the LATEST enrichWithRatings call that provided one.
+ *  Per-run precision for rating:updated is handled at the call sites (they
+  *  capture their own generation); the progress meter is a single shared
+  *  module state, so the freshest checker is the meaningful one here. */
+let progressStaleCheck: (() => boolean) | null = null;
+
 // ── Enrichment pipeline ────────────────────────────────────────────────────
+
+export interface EnrichOptions {
+  /** Return true when THIS run has been superseded (a newer refresh started).
+   *  Stale runs stop broadcasting progress immediately (entry included) and
+   *  stop invoking onUpdated — the stale-checker closure decides it. */
+  isStale?: () => boolean;
+}
 
 export function enrichWithRatings(
   movies: Movie[],
   onUpdated: (movie: Movie) => void,
+  opts?: EnrichOptions,
 ): Promise<void> {
   const resolver: IdResolver = idResolver;
   const fetcher: RatingsFetcher = ratingsFetcher;
+  const isStale = () => opts?.isStale?.() ?? false;
+  // A stale run entering the pipeline must not reset the meter of the
+  // current one (register the checker BEFORE resetProgress below).
+  progressStaleCheck = isStale;
+
+  // Per-movie rating updates always flow through this wrapper — a superseded
+  // run contributes nothing to the renderer state (the run's own generation
+  // is owned by the call site, which owns this closure).
+  const guardedOnUpdated: (movie: Movie) => void = (movie) => {
+    if (isStale()) return;
+    onUpdated(movie);
+  };
 
   debug(`starting enrichment of ${movies.length} movies`);
   resetProgress(movies.length);
@@ -81,15 +111,15 @@ export function enrichWithRatings(
 
   const phase0Resolved = resolver.applyCachedIds(
     movies,
-    onUpdated,
-    (movie, ids) => fetcher.applyImdbFromDataset(movie, ids, onUpdated),
+    guardedOnUpdated,
+    (movie, ids) => fetcher.applyImdbFromDataset(movie, ids, guardedOnUpdated),
     () => incrementProgress(),
   );
 
   // Also apply cached ratings for Phase 0 hits
   let freshCount = 0;
   for (const r of phase0Resolved) {
-    const result = fetcher.applyCachedRatings(r.movie, r.ids, onUpdated);
+    const result = fetcher.applyCachedRatings(r.movie, r.ids, guardedOnUpdated);
     if (result.fresh) {
       incrementProgress();
       freshCount++;
@@ -102,7 +132,7 @@ export function enrichWithRatings(
 
   // ── Dataset refresh callback ──────────────────────────────────────────
   onDatasetRefreshed(() => {
-    fetcher.reapplyImdbAfterRefresh(movies, onUpdated);
+    fetcher.reapplyImdbAfterRefresh(movies, guardedOnUpdated);
   });
 
   // ── Phase 1: resolve IDs for unresolved movies ───────────────────────
@@ -116,14 +146,14 @@ export function enrichWithRatings(
     await resolver.resolveIds(
       unresolvedMovies,
       ratingsQueue,
-      onUpdated,
+      guardedOnUpdated,
       () => incrementProgress(),
-      (movie, ids) => fetcher.applyImdbFromDataset(movie, ids, onUpdated),
+      (movie, ids) => fetcher.applyImdbFromDataset(movie, ids, guardedOnUpdated),
     );
     debug(`phase 1 done in ${Date.now() - phase1Start}ms: ${ratingsQueue.length} movies have IDs`);
 
     // ── Phase 1.5: batch IMDB dataset lookup ────────────────────────────
-    fetcher.batchImdbLookup(ratingsQueue, onUpdated);
+    fetcher.batchImdbLookup(ratingsQueue, guardedOnUpdated);
 
     // ── Phase 2: scrape all sources, sorted by next screening ───────────
     const phase2Queue = ratingsQueue.slice().sort((a, b) => {
@@ -136,7 +166,7 @@ export function enrichWithRatings(
     });
     debug(`phase 2: scrape ${phase2Queue.length} films (sorted by next screening)`);
     const phase2Start = Date.now();
-    await fetcher.scrapeAll(phase2Queue, onUpdated, () => incrementProgress());
+    await fetcher.scrapeAll(phase2Queue, guardedOnUpdated, () => incrementProgress());
     debug(`phase 2 done in ${Date.now() - phase2Start}ms: enrichment complete`);
   })();
 }

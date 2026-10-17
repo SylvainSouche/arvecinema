@@ -19,6 +19,13 @@ import {
   parseRetryMoviesInput,
   defaultSanitizeString,
 } from './security/ipcValidation';
+import { createRefreshSequence } from '../shared/refreshToken';
+
+// Refresh-generation sequence (review race fix): a schedule:fetch starts a
+// new generation; enrichment broadcasts from superseded runs are suppressed
+// at the enricher (isStale) so a slow older run can never overwrite the
+// latest schedule state in the renderer.
+const refreshSeq = createRefreshSequence();
 import { getNetworkActive } from '../shared/networkActivity';
 import { initLogging, getAllLogs, clearLogs } from './ratings/logger';
 import { log } from './ratings/moduleLoggers';
@@ -141,6 +148,10 @@ ipcMain.handle('schedule:fetch', async (evt, cinemaIds?: unknown): Promise<Sched
 
   const t0 = Date.now();
 
+  // New refresh generation — from here on, any still-running older
+  // schedule:fetch's enrichment broadcasts are considered stale.
+  const gen = refreshSeq.next();
+
   // Fetch each cinema in parallel and keep its individual status.
   const results = await Promise.all(
     enabled.map(
@@ -211,35 +222,44 @@ ipcMain.handle('schedule:fetch', async (evt, cinemaIds?: unknown): Promise<Sched
   // then enrich in the background. As each movie is enriched, a
   // `rating:updated` IPC event is sent to the renderer so the UI
   // updates progressively.
-  enrichWithRatings(movies, (movie) => {
-    // Send the updated movie to all renderer windows.
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send('rating:updated', {
-        cinemaId: movie.cinemaId,
-        movieId: movie.id,
-        ratings: {
-          imdbId: movie.imdbId,
-          imdbRating: movie.imdbRating,
-          imdbVotes: movie.imdbVotes,
-          imdbUrl: movie.imdbUrl,
-          imdbStatus: movie.imdbStatus,
-          imdbStatusMessage: movie.imdbStatusMessage,
-          allocinePress: movie.allocinePress,
-          allocineAudience: movie.allocineAudience,
-          allocineVotes: movie.allocineVotes,
-          allocineUrl: movie.allocineUrl,
-          allocineStatus: movie.allocineStatus,
-          allocineStatusMessage: movie.allocineStatusMessage,
-          rtTomatometer: movie.rtTomatometer,
-          rtCertifiedFresh: movie.rtCertifiedFresh,
-          rtUrl: movie.rtUrl,
-          rtStatus: movie.rtStatus,
-          rtStatusMessage: movie.rtStatusMessage,
-          wikidataUrl: movie.wikidataUrl,
-        },
-      });
-    }
-  });
+  //
+  // Refresh-generation guard: enrichWithRatings stops broadcasting (both
+  // rating:updated via its guarded onUpdated, and ratings:progress via the
+  // shared isStale check) the moment a newer schedule:fetch supersedes this
+  // generation — a slow older run cannot overwrite the newest data.
+  enrichWithRatings(
+    movies,
+    (movie) => {
+      // Send the updated movie to all renderer windows.
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send('rating:updated', {
+          cinemaId: movie.cinemaId,
+          movieId: movie.id,
+          ratings: {
+            imdbId: movie.imdbId,
+            imdbRating: movie.imdbRating,
+            imdbVotes: movie.imdbVotes,
+            imdbUrl: movie.imdbUrl,
+            imdbStatus: movie.imdbStatus,
+            imdbStatusMessage: movie.imdbStatusMessage,
+            allocinePress: movie.allocinePress,
+            allocineAudience: movie.allocineAudience,
+            allocineVotes: movie.allocineVotes,
+            allocineUrl: movie.allocineUrl,
+            allocineStatus: movie.allocineStatus,
+            allocineStatusMessage: movie.allocineStatusMessage,
+            rtTomatometer: movie.rtTomatometer,
+            rtCertifiedFresh: movie.rtCertifiedFresh,
+            rtUrl: movie.rtUrl,
+            rtStatus: movie.rtStatus,
+            rtStatusMessage: movie.rtStatusMessage,
+            wikidataUrl: movie.wikidataUrl,
+          },
+        });
+      }
+    },
+    { isStale: () => !refreshSeq.isCurrent(gen) },
+  );
 
   // enrichWithRatings runs Phase 0 synchronously (cached ratings applied
   // to movie objects in-place) before returning. So by the time we

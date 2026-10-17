@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Movie, CinemaInfo, CinemaStatus } from '../../shared/types';
 import { fetchCinemas, fetchSchedule, onCinemasChanged } from '../api/cinemaApi';
 import { todayIso } from '../../shared/cinema';
+import { createRefreshSequence } from '../../shared/refreshToken';
 
 // ──────────────────────────────────────────────────────────────────────────
 // useSchedule — fetches the cinema list + schedule.
@@ -10,8 +11,13 @@ import { todayIso } from '../../shared/cinema';
 // lastUpdated, and the reload callback (triggered by cinema selection
 // changes or the manual refresh button).
 //
-// Uses a cancellation flag + useCallback so React StrictMode's double-mount
-// in dev doesn't race two concurrent fetches.
+// Refresh-generation guard (review race fix): reload() can be triggered
+// concurrently — selection change, manual ↻, cinemas:changed — and the
+// older trigger's cleanup is NOT always run (onCinemasChanged and the
+// manual refresh call reload() directly, bypassing the effect's cleanup).
+// So the cancellation flag alone is not enough: every response must be
+// checked against the token sequence, and a late OLDER response is
+// discarded instead of overwriting the latest schedule.
 // ──────────────────────────────────────────────────────────────────────────
 
 export function useSchedule(selectedCinemaIds: string[]): {
@@ -33,6 +39,12 @@ export function useSchedule(selectedCinemaIds: string[]): {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
+  // Refresh generations: useRef keeps ONE sequence for this hook instance's
+  // lifetime (StrictMode remounts create fresh state, which is fine — the
+  // double-mount guard stays the cleanup-based cancellation flag). The
+  // allocation is a cheap object; only the first render's copy is retained.
+  const seqRef = useRef(createRefreshSequence());
+
   // Load cinema list (one-shot)
   useEffect(() => {
     fetchCinemas()
@@ -45,10 +57,14 @@ export function useSchedule(selectedCinemaIds: string[]): {
   const reload = useCallback(() => {
     let cancelled = false;
     setLoading(true);
+    const seq = seqRef.current;
+    const gen = seq.next();
     const ids = selectedCinemaIds.length === 0 ? undefined : selectedCinemaIds;
     fetchSchedule(ids)
       .then(({ movies, availableDays, cinemaStatuses }) => {
-        if (cancelled) return;
+        // Discard superseded responses (late OLDER schedule must never
+        // overwrite the latest) as well as unmounted effects.
+        if (cancelled || !seq.isCurrent(gen)) return;
         setMovies(movies);
         setAvailableDays(availableDays);
         setCinemaStatuses(cinemaStatuses);
@@ -60,10 +76,14 @@ export function useSchedule(selectedCinemaIds: string[]): {
         setError(null);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (cancelled || !seq.isCurrent(gen)) return;
+        setError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        // Only the CURRENT fetch controls the loading flag — an older
+        // in-flight fetch resolving must not flip it while a newer one runs.
+        if (cancelled || !seq.isCurrent(gen)) return;
+        setLoading(false);
       });
     return () => {
       cancelled = true;
