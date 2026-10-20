@@ -70,6 +70,7 @@ vi.mock('../../../../src/shared/fetchWithTimeout', () => ({
 import { getPlugin } from '../../../../src/main/cinemas/adapters';
 
 const MONTBLANC = {
+  kind: 'boxofficeapi',
   baseUrl: 'https://www.cinemontblanc.fr',
   theaterId: 'P1798',
 };

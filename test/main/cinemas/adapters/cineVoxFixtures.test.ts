@@ -32,6 +32,7 @@ function makeAdapter() {
   const plugin = getPlugin('cinevox');
   if (!plugin) throw new Error('cinevox plugin missing');
   return plugin.createAdapter('chamonix', {
+    kind: 'cinevox',
     baseUrl: 'https://www.cinemavox-chamonix.com',
   });
 }
