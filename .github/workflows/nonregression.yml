@@ -1,0 +1,119 @@
+# Non-regression — live scraping protocols.
+#
+# WHY: the PR/push CI runs e2e against the recorded network fixture
+# (test/fixtures/network-capture.json). That verifies app behavior, NOT
+# that the cinema sites and rating sources still accept the app's scraping
+# protocols. Markup redesigns, WAF changes, UA-policy changes and endpoint
+# moves only show up against the live network.
+#
+# WHAT:
+#   1. scrape-probe — plain-HTTP reachability of every endpoint the
+#      adapters use (cinemas' schedule APIs, Wikidata, AlloCiné, RT, IMDB
+#      dataset + title pages), same User-Agent as the app. Fast (~1 min),
+#      answers "do they block GitHub-runner IPs?" per source.
+#   2. e2e-live — the full app (Electron + Playwright) against the REAL
+#      network, same suite as the replay CI but without the fixture.
+#      Authoritative check that the app's actual scraping stack works.
+#
+# Scheduling: weekly, Monday 06:23 UTC (off-peak minute), plus manual
+# dispatch for experiments. `concurrency` never cancels — a scheduled run
+# must never be dropped because a manual one is in flight.
+#
+# Interpretation: failures here are NOT app bugs by definition — they are
+# the signal to re-record the fixture (`npm run record`) or to update the
+# adapters/scrape-probe endpoints. The probe report artifact tells exactly
+# which source regressed.
+#
+# Drift note: scrape-probe.mjs mirrors the adapters' endpoints/UA by hand;
+# test/main/scrapeProbeContract.test.ts pins that mirroring.
+
+name: Non-regression (live scraping)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 6 * * 1' # Mondays 06:23 UTC — weekly
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nonregression
+  cancel-in-progress: false
+
+jobs:
+  scrape-probe:
+    name: Scrape probe (cinemas + rating sources reachability)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Probe every scraping endpoint
+        run: node scripts/scrape-probe.mjs --json probe-report.json
+        env:
+          PROBE_TIMEOUT_MS: '15000'
+
+      - name: Upload probe report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrape-probe-report
+          path: probe-report.json
+          retention-days: 30
+
+  e2e-live:
+    name: Full app E2E (live network)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      # The app needs better-sqlite3 compiled for Electron's ABI (not Node's).
+      # See TESTING.md → troubleshooting.
+      - name: Rebuild native module (Electron ABI)
+        run: npx electron-rebuild -f -w better-sqlite3
+
+      # Shared libraries the Electron binary needs on a bare runner.
+      - name: Install Electron system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-0 libnotify4 libnss3 libxss1 \
+            libasound2 libxtst6 libgbm1 xdg-utils
+
+      # Same Playwright suite as the replay CI, but LIVE: real schedules
+      # from the 4 cinemas, real ratings enrichment. run-e2e.sh starts
+      # Xvfb automatically (no DISPLAY on the runner).
+      - name: Run full-app E2E against live network
+        run: npm run test:e2e
+
+      - name: Upload Playwright report + app logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-live-report
+          path: |
+            playwright-report/
+            test-results/
+            /home/runner/.config/*/logs/
+          retention-days: 14
+          if-no-files-found: ignore
