@@ -13,7 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { buildUserAgent, buildProbeTargets, runProbe } from '../../scripts/scrape-probe.mjs';
+import { buildUserAgent, buildProbeTargets, runProbe, validateBoxofficeSchedule, validateHtmlReachable } from '../../scripts/scrape-probe.mjs';
 
 const probeSource = readFileSync(
   path.join(process.cwd(), 'scripts/scrape-probe.mjs'),
@@ -66,7 +66,7 @@ describe('scrape-probe: UA + rating sources mirror the app', () => {
     const ids = buildProbeTargets([]).map((t) => t.id);
     expect(ids).toEqual([
       'ratings:wikidata',
-      'ratings:allocine',
+      'ratings:allocine-search',
       'ratings:rottentomatoes',
       'ratings:imdb-title',
       'ratings:imdb-datasets',
@@ -74,6 +74,93 @@ describe('scrape-probe: UA + rating sources mirror the app', () => {
     // Wikidata via api.php only — the app deliberately does NOT use SPARQL.
     expect(probeSource).toContain('api.php');
     expect(probeSource).not.toContain('query.wikidata.org');
+    // AlloCiné probe tracks the app's LIVE protocol endpoint…
+    expect(probeSource).toContain('/recherche/?q=');
+  });
+
+  it('fetchable JSON/HTML targets have invariant validators (no 200-but-useless passes)', () => {
+    const targets = buildProbeTargets(config.cinemas);
+    const validating = targets.filter((t) => t.parseBody).map((t) => t.id);
+    // schedule endpoints + wikidata + RT root + cinevox horaires page
+    expect(validating).toContain('cinema:mont-blanc');
+    expect(validating).toContain('cinema:bonneville');
+    expect(validating).toContain('cinema:chamonix');
+    expect(validating).toContain('ratings:wikidata');
+    expect(validating).toContain('ratings:rottentomatoes');
+    expect(targets.find((t) => t.id === 'ratings:imdb-title')?.parseBody).toBeFalsy();
+    expect(targets.find((t) => t.id === 'ratings:imdb-datasets')?.parseBody).toBeFalsy();
+  });
+});
+
+describe('scrape-probe: schedule invariant validator (real fixture body)', () => {
+  const fixture: Record<string, { body: string }> = JSON.parse(
+    readFileSync(path.join(process.cwd(), 'test/fixtures/network-capture.json'), 'utf8'),
+  );
+  const schedKey = Object.keys(fixture).find(
+    (k) => k.includes('schedule') && k.includes('P1798'),
+  );
+  expect(schedKey).toBeDefined();
+  const realBody = fixture[schedKey as string].body;
+
+  it('HEALTHY: the real captured mont-blanc schedule validates with stats', () => {
+    expect(realBody).toBeTruthy();
+    const v = validateBoxofficeSchedule(realBody, 'P1798');
+    expect(v.state).toBe('healthy');
+    if (!v.stats) throw new Error('expected stats on a healthy schedule');
+    expect(v.stats.movies).toBeGreaterThan(0);
+    expect(v.stats.showtimes).toBeGreaterThan(0);
+    expect(v.stats.days).toBeGreaterThan(0);
+    expect(v.stats.malformed).toBe(0);
+  });
+
+  it('BROKEN: missing theater key / missing .schedule / non-JSON body', () => {
+    const theater = JSON.parse(realBody);
+    delete theater.P1798;
+    expect(validateBoxofficeSchedule(JSON.stringify(theater), 'P1798').state).toBe('broken');
+    const noSchedule = { P1798: {} };
+    expect(validateBoxofficeSchedule(JSON.stringify(noSchedule), 'P1798').state).toBe('broken');
+    expect(validateBoxofficeSchedule('<html>Now JSON</html>', 'P1798').state).toBe('broken');
+  });
+
+  it('UNKNOWN: valid shape but empty schedule (off-season) is NOT a failure', () => {
+    const empty = JSON.parse(realBody);
+    empty.P1798.schedule = {};
+    const v = validateBoxofficeSchedule(JSON.stringify(empty), 'P1798');
+    expect(v.state).toBe('unknown');
+    // unknown never fails the whole probe
+    expect(v.stats?.movies).toBe(0);
+  });
+
+  it('DEGRADED: showtimesDates missing (day selector breaks) + malformed startsAt rows', () => {
+    const noDates = JSON.parse(realBody);
+    delete noDates.P1798.showtimesDates;
+    expect(validateBoxofficeSchedule(JSON.stringify(noDates), 'P1798').state).toBe('degraded');
+
+    const theater: Record<
+      string,
+      { schedule: Record<string, Record<string, Array<Record<string, unknown>>>> }
+    > = JSON.parse(realBody);
+    const firstMovieKey = Object.keys(theater.P1798.schedule)[0];
+    const firstDayKey = Object.keys(theater.P1798.schedule[firstMovieKey])[0];
+    theater.P1798.schedule[firstMovieKey][firstDayKey][0].startsAt = 'not-a-date';
+    const v = validateBoxofficeSchedule(JSON.stringify(theater), 'P1798');
+    expect(v.state).toBe('degraded');
+    expect(v.stats?.malformed).toBe(1);
+  });
+});
+
+describe('scrape-probe: challenge-page detection (HTML sources)', () => {
+  it('200-but-Cloudflare → degraded (reachable, useless to the scraper)', () => {
+    expect(validateHtmlReachable('<html>Just a moment...</html>', 'x').state).toBe('degraded');
+    expect(validateHtmlReachable('<form id="cf-challenge">', 'x').state).toBe('degraded');
+    expect(validateHtmlReachable('<html><body>les séances</body></html>', 'x').state).toBe('healthy');
+  });
+
+  it('benign recaptcha integrations (booking widgets) are NOT challenges', () => {
+    // Real case: cinevox /horaires/ embeds a recaptcha release script on ~4.
+    const page = '<html><body><h1>Séances</h1>' + '<p>séance</p>'.repeat(2000) +
+      '<script src="https://www.gstatic.com/recaptcha/releases/x/recaptcha__fr.js" async></script></body></html>';
+    expect(validateHtmlReachable(page, 'x').state).toBe('healthy');
   });
 });
 

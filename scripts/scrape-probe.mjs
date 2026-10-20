@@ -1,33 +1,42 @@
 #!/usr/bin/env node
 // ──────────────────────────────────────────────────────────────────────────
-// scrape-probe — HTTP reachability check of every scraping protocol the app
-// depends on, run from CI. Answers one question directly: do the cinema
-// sites / rating sources block GitHub-runner IPs?
+// scrape-probe — non-regression of every scraping protocol the app depends
+// on, run from CI. Two layers per target:
 //
-// Scope (mirrors src/main/ — the exact endpoints the adapters use):
-//   - 4 builtin cinemas, via their REAL schedule endpoints
-//     (boxofficeapi: {baseUrl}/api/gatsby-source-boxofficeapi/schedule?…;
-//      cinevox: site root — playwright scrapes HTML)
-//   - rating sources: Wikidata API, AlloCiné search page, Rotten Tomatoes,
-//     IMDB title page (browser-only: the app reaches it via browserFetch +
-//     AWS WAF challenge — a plain fetch 403 there is a WARN, not a block
-//     verdict), IMDB datasets host
+//   1. HTTP reachability (status code)
+//   2. INVARIANT VALIDATION of the response body where the protocol is
+//      plain fetch (JSON schedule APIs, HTML sources): does the payload
+//      still carry what the adapters parse? This is what catches "the site
+//      returns 200 but nothing the app can use" — the failure class the
+//      recorded fixture CI is blind to.
 //
-// Interpretation guide:
-//   ok      — 2xx/3xx: reachable, no block
-//   warn    — browser-only sources (IMDB WAF) where a plain-fetch
-//             403/429/503 is expected, reached later via browserFetch
-//   blocked — everything else non-2xx: hard block (403/429/503 on
-//             plain-HTTP sources → IP/UA problem) OR endpoint moved/
-//             removed (404/410/… → scraping protocol regression)
-//   error   — network failure / timeout / DNS
+// State model (per target; mirrors the "healthy → changed → degraded →
+// broken → unknown" monitoring framework):
+//   healthy  — reachable AND invariants pass (screenings present, fields sane)
+//   degraded — reachable, parses, but a piece is off (missing showtimesDates,
+//              malformed startsAt rows, challenge-page markers in HTML)
+//   broken   — unreachable, wrong shape (no body[theaterId].schedule), or
+//              endpoint removed/moved (404/410) — the app cannot work
+//   unknown  — reachable and valid-shaped but EMPTY schedule: NOT a failure
+//              by default (cinema may be between programmes). The weekly
+//              issue-notifier tracks a sustained-empty streak separately.
 //
-// Drift risk (documented): the endpoints here mirror the adapters by hand.
-// test/main/scrapeProbeContract.test.ts pins the mirroring (UA format,
-// endpoint shapes) — update both together when an adapter changes.
+// Endpoint scope (mirrors src/main/ — the exact endpoints adapters use):
+//   - boxofficeapi cinemas (3/4): {baseUrl}/api/gatsby-source-boxofficeapi/
+//     schedule?from=&to=&theaters= — same params as the adapter
+//   - cinevox: {baseUrl}/horaires/ HTML the cheerio scraper walks (probe =
+//     reachability + challenge-marker detection; deep parsing lives in the
+//     adapter fixture tests and e2e-live)
+//   - ratings: Wikidata api.php, AlloCiné search page, RT, IMDB title page
+//     (browser-only — plain-fetch challenge 403s are 'warn', not broken),
+//     IMDB datasets host
+//
+// Drift risk (documented): validator fields mirror boxOfficeApi.ts Phase 1
+// by hand. test/main/scrapeProbeContract.test.ts pins the mirroring —
+// update both together when the adapter changes.
 //
 // Usage:
-//   node scripts/scrape-probe.mjs                 # human table, exit 1 on blocked/error
+//   node scripts/scrape-probe.mjs                 # human table, exit 1 on broken/degraded
 //   node scripts/scrape-probe.mjs --json out.json # + JSON artifact
 //   PROBE_TIMEOUT_MS=15000 node scripts/scrape-probe.mjs
 //
@@ -45,10 +54,83 @@ export function buildUserAgent(version) {
   return `ArveCinema/${version} (https://github.com/SylvainSouche/arvecinema)`;
 }
 
+/** Challenge-page markers for HTML sources served "200 OK but it's a WAF".
+ *  Deliberately UNAMBIGUOUS only: 'captcha'/'recaptcha' are excluded — real
+ *  cinema pages embed benign reCAPTCHA scripts for booking forms (seen on
+ *  cinevox /horaires/, a 300 KB page, first hit at char 1154). Actual
+ *  challenge shells put "Just a moment..." / cf-challenge in the first KB. */
+const CHALLENGE_MARKERS = ['just a moment', 'cf-challenge', 'aws-waf-token'];
+
+/** Challenge shells are tiny; only scan the head of the document. */
+const CHALLENGE_SCAN_BYTES = 8192;
+
+/**
+ * Invariant validator for a boxofficeapi schedule response — mirrors
+ * boxOfficeApi.ts Phase 1 expectations (theaterData.schedule object keyed
+ * by movie, showtimesDates array for the day selector, per-showtime
+ * startsAt + tags; screen/data are adapter-optional).
+ */
+export function validateBoxofficeSchedule(bodyText, theaterId) {
+  let stats;
+  try {
+    const raw = JSON.parse(bodyText);
+    const theater = raw?.[theaterId];
+    if (!theater || typeof theater !== 'object') {
+      return { state: 'broken', detail: `no "${theaterId}" key in schedule JSON — adapter can't find its data` };
+    }
+    if (!theater.schedule || typeof theater.schedule !== 'object') {
+      return { state: 'broken', detail: 'missing/invalid ".schedule" — the property the adapter iterates is gone' };
+    }
+    const movieIds = Object.keys(theater.schedule);
+    let showtimes = 0;
+    let malformed = 0;
+    for (const dates of Object.values(theater.schedule)) {
+      if (!dates || typeof dates !== 'object') continue;
+      for (const dayList of Object.values(dates)) {
+        if (!Array.isArray(dayList)) continue;
+        for (const st of dayList) {
+          showtimes++;
+          const d = st?.startsAt ? new Date(st.startsAt) : null;
+          if (!d || Number.isNaN(d.getTime())) malformed++;
+        }
+      }
+    }
+    const daysOk = Array.isArray(theater.showtimesDates);
+    stats = {
+      movies: movieIds.length,
+      days: daysOk ? theater.showtimesDates.length : 0,
+      showtimes,
+      malformed,
+    };
+
+    if (movieIds.length === 0 || showtimes === 0) {
+      return { state: 'unknown', detail: 'valid shape but EMPTY schedule (off-season empty is normal; streak tracked downstream)', stats };
+    }
+    if (!daysOk) {
+      return { state: 'degraded', detail: '".showtimesDates" missing — day selector breaks while schedules still parse', stats };
+    }
+    if (malformed > 0) {
+      return { state: 'degraded', detail: `${malformed}/${showtimes} showtimes with unparseable "startsAt"`, stats };
+    }
+    return { state: 'healthy', detail: `${movieIds.length} movies, ${theater.showtimesDates.length} days, ${showtimes} showtimes`, stats };
+  } catch (err) {
+    return { state: 'broken', detail: `schedule endpoint no longer JSON: ${err?.message ?? String(err)}` };
+  }
+}
+
+/** HTML source validator: reachable-but-challenge detection. */
+export function validateHtmlReachable(bodyText, label) {
+  const snippet = bodyText.slice(0, CHALLENGE_SCAN_BYTES).toLowerCase();
+  const hit = CHALLENGE_MARKERS.find((m) => snippet.includes(m));
+  if (hit) {
+    return { state: 'degraded', detail: `200 OK but response is a challenge page (marker: "${hit}") — browser-only path` };
+  }
+  return { state: 'healthy', detail: `${label} reachable, no challenge markers (${Math.round(bodyText.length / 1024)} KB)` };
+}
+
 /**
  * Build the probe list from the builtin cinema config (JSON shape of
  * src/main/cinemas/cinemas.config.json).
- * @param {Array<{id: string, adapter: {kind: string, baseUrl: string, theaterId?: string}}>} cinemas
  */
 export function buildProbeTargets(cinemas) {
   const now = new Date();
@@ -74,16 +156,20 @@ export function buildProbeTargets(cinemas) {
         url: `${baseUrl}/api/gatsby-source-boxofficeapi/schedule?${params}`,
         headers: { Referer: `${baseUrl}/` },
         expect: 'ok',
+        validate: (bodyText) => validateBoxofficeSchedule(bodyText, theaterId),
+        parseBody: true,
       });
     } else {
-      // Scraper-kind (e.g. cinevox): the schedule API is the HTML page the
-      // playwright scraper walks — reachability of the root is the check.
+      // Scraper-kind (e.g. cinevox): probe the FULL schedule page the
+      // cheerio scraper walks, not just the root.
       targets.push({
         id: `cinema:${c.id}`,
         group: 'cinemas',
-        url: baseUrl,
+        url: `${baseUrl}/horaires/`,
         headers: {},
         expect: 'ok',
+        parseBody: true,
+        validate: (bodyText) => validateHtmlReachable(bodyText, 'schedule page'),
       });
     }
   }
@@ -96,10 +182,26 @@ export function buildProbeTargets(cinemas) {
       url: 'https://www.wikidata.org/w/api.php?action=wbgetentities&ids=Q42&format=json',
       headers: {},
       expect: 'ok',
+      parseBody: true,
+      validate: (bodyText) => {
+        try {
+          const j = JSON.parse(bodyText);
+          if (!j?.entities?.Q42) {
+            return { state: 'broken', detail: 'wbgetentities response missing entities.Q42 — API contract changed' };
+          }
+          return { state: 'healthy', detail: 'wbgetentities shape ok (entities.Q42 present)' };
+        } catch {
+          return { state: 'broken', detail: 'wikidata api.php no longer JSON' };
+        }
+      },
     },
     {
-      id: 'ratings:allocine',
+      id: 'ratings:allocine-search',
       group: 'ratings',
+      // The app's CURRENT protocol endpoint (allocineClient.searchAllocineByTitle).
+      // NOTE: 2026-10: AlloCiné retired /recherche/?q= (410) — this probe
+      // target tracks the app's live protocol until it migrates to the new
+      // client-rendered flow. A 410 here = protocol regression = fail.
       url: 'https://www.allocine.fr/recherche/?q=cinema',
       headers: {},
       expect: 'ok',
@@ -110,6 +212,8 @@ export function buildProbeTargets(cinemas) {
       url: 'https://www.rottentomatoes.com/',
       headers: {},
       expect: 'ok',
+      parseBody: true,
+      validate: (bodyText) => validateHtmlReachable(bodyText, 'RT root'),
     },
     {
       id: 'ratings:imdb-title',
@@ -135,7 +239,8 @@ export function buildProbeTargets(cinemas) {
 /**
  * Run the probe. `fetchImpl` is injected so tests never touch the network.
  * @returns {Promise<{ok: boolean, results: Array<Record<string, unknown>>}>}
- */export async function runProbe(targets, deps) {
+ */
+export async function runProbe(targets, deps) {
   const { fetchImpl, timeoutMs, userAgent } = deps;
   const results = [];
   for (const t of targets) {
@@ -144,6 +249,8 @@ export function buildProbeTargets(cinemas) {
     const started = Date.now();
     let status = null;
     let verdict;
+    let state = null;
+    let stats = undefined;
     let detail = '';
     try {
       const res = await fetchImpl(t.url, {
@@ -155,8 +262,32 @@ export function buildProbeTargets(cinemas) {
       status = res.status;
       if (res.status >= 200 && res.status < 400) {
         verdict = 'ok';
+        // Body-level invariant validation (only where the protocol is plain
+        // fetch AND the response carries parseable content).
+        if (t.parseBody) {
+          try {
+            const bodyText = await res.text();
+            const v = t.validate(bodyText);
+            state = v.state;
+            stats = v.stats;
+            detail = v.detail;
+          } catch (err) {
+            state = 'broken';
+            detail = `body read failed: ${err?.message ?? String(err)}`;
+          }
+        }
+        if (!state) {
+          state = 'healthy';
+          if (!detail) {
+            detail =
+              t.expect === 'browser-ok'
+                ? 'HTTP ok (browser-only source; the app reaches it via browserFetch)'
+                : '';
+          }
+        }
       } else if ([403, 429, 503].includes(res.status)) {
         verdict = t.expect === 'browser-ok' ? 'warn' : 'blocked';
+        state = verdict === 'warn' ? 'unknown' : 'broken';
         detail =
           t.expect === 'browser-ok'
             ? `HTTP ${res.status} — expected for plain fetch (browser-only source)`
@@ -165,6 +296,7 @@ export function buildProbeTargets(cinemas) {
         // 404/410 etc. — the endpoint MOVED or was REMOVED: a scraping
         // protocol regression (the app keeps calling it and gets garbage).
         verdict = 'blocked';
+        state = 'broken';
         detail = `HTTP ${res.status} — endpoint moved/removed? scraping protocol regression`;
       }
     } catch (err) {
@@ -172,6 +304,7 @@ export function buildProbeTargets(cinemas) {
         err instanceof Error &&
         (err.name === 'AbortError' || /aborted|timeout/i.test(err.message ?? ''));
       verdict = 'error';
+      state = 'broken';
       detail = isAbort ? `timeout after ${timeoutMs}ms` : `${err?.message ?? String(err)}`;
     } finally {
       clearTimeout(timer);
@@ -184,28 +317,29 @@ export function buildProbeTargets(cinemas) {
       status,
       ms: Date.now() - started,
       verdict,
+      state,
+      stats,
       detail,
     });
   }
-  const ok = results.every((r) => r.verdict === 'ok' || r.verdict === 'warn');
+  const ok = results.every((r) => r.state !== 'broken' && r.state !== 'degraded');
   return { ok, results };
 }
 
 function printTable(results) {
   const pad = (s, n) => String(s).padEnd(n);
   console.log('');
-  console.log(pad('TARGET', 26) + pad('STATUS', 8) + pad('MS', 8) + pad('VERDICT', 9) + 'DETAIL');
-  console.log('─'.repeat(96));
+  console.log(
+    pad('TARGET', 26) + pad('STATUS', 8) + pad('MS', 8) + pad('STATE', 9) + 'DETAIL',
+  );
+  console.log('─'.repeat(100));
   for (const r of results) {
-    console.log(
-      pad(r.id, 26) +
-        pad(r.status ?? '—', 8) +
-        pad(r.ms, 8) +
-        pad(r.verdict.toUpperCase(), 9) +
-        r.detail,
-    );
+    const stat = r.stats
+      ? ` [m${r.stats.movies}/d${r.stats.days}/s${r.stats.showtimes}${r.stats.malformed ? ` !${r.stats.malformed}` : ''}]`
+      : '';
+    console.log(pad(r.id, 26) + pad(r.status ?? '—', 8) + pad(r.ms, 8) + pad(r.state ?? '?', 9) + r.detail + stat);
   }
-  console.log('─'.repeat(96));
+  console.log('─'.repeat(100));
 }
 
 async function main() {
@@ -226,13 +360,27 @@ async function main() {
   const jsonArg = process.argv.indexOf('--json');
   const outPath = jsonArg >= 0 ? process.argv[jsonArg + 1] : process.env.PROBE_OUTPUT;
   if (outPath) {
-    fs.writeFileSync(outPath, JSON.stringify({ ok, results }, null, 2) + '\n');
+    fs.writeFileSync(
+      outPath,
+      JSON.stringify(
+        {
+          ok,
+          runAt: new Date().toISOString(),
+          results,
+        },
+        null,
+        2,
+      ) + '\n',
+    );
     console.log(`[scrape-probe] report written: ${outPath}`);
   }
 
-  const blocked = results.filter((r) => r.verdict !== 'ok' && r.verdict !== 'warn');
+  const bad = results.filter((r) => r.state === 'broken' || r.state === 'degraded');
+  const unknown = results.filter((r) => r.state === 'unknown');
   console.log(
-    `[scrape-probe] ${ok ? 'ALL REACHABLE' : 'FAILURES'}: ${results.length - blocked.length} ok/warn, ${blocked.length} blocked/error`,
+    `[scrape-probe] ${ok ? 'NO REGRESSIONS' : 'FAILURES'}: ` +
+      `${results.length - bad.length - unknown.length} healthy, ${unknown.length} unknown(empty), ` +
+      `${bad.filter((b) => b.state === 'degraded').length} degraded, ${bad.filter((b) => b.state === 'broken').length} broken`,
   );
   process.exit(ok ? 0 : 1);
 }
