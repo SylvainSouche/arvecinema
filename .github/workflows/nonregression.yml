@@ -36,6 +36,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: nonregression
@@ -69,6 +70,16 @@ jobs:
           name: scrape-probe-report
           path: probe-report.json
           retention-days: 30
+
+      # Notification layer on top of the red/green run: ONE tracking issue,
+      # only commented/edited when the failure SET changes, closed when
+      # everything is healthy again. The issue body persists the fingerprint
+      # + empty-schedule streak counters (no cross-run storage needed).
+      - name: Report state changes to the tracking issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/cinema-monitor-issue.mjs probe-report.json
 
   e2e-live:
     name: Full app E2E (live network)
