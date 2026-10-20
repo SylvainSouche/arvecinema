@@ -1,0 +1,59 @@
+# Dependabot — dependency upgrades routed through the regression gates.
+#
+# Every Dependabot PR gets the full CI suite (typecheck + 434 unit tests +
+# contract tests + build), so a proposed upgrade is validated before merge —
+# the review's "test against the upgrade" requirement. Master is always
+# tested green first, so a red upgrade PR means the upgrade is the suspect.
+#
+# Grouping policy:
+#   - development + minor/patch Franklin-of-dependencies → one batched PR
+#     (low risk, review cost stays sane)
+#   - the ABI- and runtime-critical packages stay UNgrouped (their major
+#     bumps can only be validated individually): electron + better-sqlite3
+#     (Node ABI trap — we rebuild for Electron's 130), playwright
+#     (drives e2e), react + react-dom (renderer-wide), vite + electron-vite
+#     (build pipeline), tldts (owns the PSL security allow-list).
+version: 2
+updates:
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'tuesday'
+      time: '05:00'
+      timezone: 'Europe/Paris'
+    open-pull-requests-limit: 8
+    groups:
+      dev-dependencies:
+        dependency-type: 'development'
+        update-type: 'semver:minor'
+        exclude-patterns:
+          - 'playwright*'
+          - 'vite*'
+          - 'electron-vite'
+      runtime-minor-and-patch:
+        dependency-type: 'production'
+        update-type: 'semver:minor'
+        exclude-patterns:
+          - 'electron'
+          - 'better-sqlite3'
+          - 'react*'
+          - 'tldts'
+    ignore:
+      # Major bumps are handled manually (e.g. better-sqlite3 needs an
+      # electron-rebuild cycle + e2e validation — never a batched auto-PR).
+      - dependency-name: 'electron'
+        update-type: 'version-update:semver-major'
+      - dependency-name: 'better-sqlite3'
+        update-type: 'version-update:semver-major'
+      - dependency-name: 'playwright*'
+        update-type: 'version-update:semver-major'
+
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor:
+        update-type: 'semver:minor'
