@@ -16,6 +16,7 @@ export declare function buildIssueBody(
   prevBody: string,
   today: string,
 ): string;
+export declare function fingerprintMarker(fingerprint: string): string;
 export declare interface MonitorRow {
   id: string;
   group: string;

@@ -104,8 +104,21 @@ describe('buildIssueBody', () => {
     expect(body).toContain('`cinema:a`'); // fails table row present
     expect(body).not.toContain('`cinema:b`'); // healthy not in the fails table
     expect(body).toContain('empty schedule for 5 consecutive run(s)'); // 4+1
-    expect(body).toMatch(/<!-- monitor-fingerprint: \d+ -->/);
+    expect(body).toMatch(/<!-- monitor-fingerprint: \S+ -->/);
     expect(body).toContain('<!-- empty-streak: cinema:c=5,2026-09-22 -->'); // persistence marker
+  });
+
+  it('fingerprint round-trip: the body marker decodes to the EXACT computed fingerprint (change detection contract)', () => {
+    // Live regression caught on 2026-10-20: the marker once held a timestamp
+    // while main() compared the computed fingerprint → "changed" every run.
+    const body = buildIssueBody({ results: res }, '', '2026-10-20');
+    const persisted = body.match(/<!-- monitor-fingerprint: (\S+) -->/)?.[1]!;
+    const decoded = Buffer.from(persisted, 'base64').toString('utf8');
+    expect(decoded).toBe(buildFingerprint(res));
+    // Two consecutive reports of the SAME failure set carry the SAME marker
+    // (the no-spam guarantee), even though "Last run" timestamps differ.
+    const body2 = buildIssueBody({ results: res }, body, '2026-10-27');
+    expect(body2.match(/<!-- monitor-fingerprint: (\S+) -->/)?.[1]).toBe(persisted);
   });
 
   it('all-healthy body states "none" (and stays famous-simple)', () => {

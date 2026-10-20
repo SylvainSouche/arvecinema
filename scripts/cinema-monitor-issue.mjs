@@ -76,6 +76,7 @@ function markdownTable(results) {
 
 export function buildIssueBody(report, prevBody, today) {
   const { results } = report;
+  const fingerprint = buildFingerprint(results);
   const failures = results.filter((r) => r.state === 'broken' || r.state === 'degraded');
   const emptyStreaks = updateEmptyStreaks(prevBody, results, today);
   const emptyLines = emptyStreaks
@@ -99,8 +100,17 @@ export function buildIssueBody(report, prevBody, today) {
     '## Empty schedules (tracked streak)',
     emptyLines || '_none_',
     '',
-    `<!-- monitor-fingerprint: ${Date.now() % 1_000_000_000} -->`,
+    // Single-line persistence of the failure-set fingerprint (the exact
+    // value main() compares against). Base64: the fingerprint is multiline.
+    fingerprintMarker(fingerprint),
   ].join('\n');
+}
+
+/** The marker expected in an issue body for a given failure set — the
+ *  comparison contract between what buildIssueBody persists and what
+ *  main() reads back (kept in one place so they can never drift). */
+export function fingerprintMarker(fingerprint) {
+  return `<!-- monitor-fingerprint: ${Buffer.from(fingerprint).toString('base64')} -->`;
 }
 
 function gh(args, opts = {}) {
@@ -160,7 +170,12 @@ function main() {
   }
 
   // Change detection: compare failure-set fingerprints carried in the body.
-  const prevFingerprint = (issue.body ?? '').match(/<!-- monitor-fingerprint: (.+?) -->/)?.[1];
+  // Change detection: the marker is a base64 of the previous run's
+  // failure-set fingerprint (same contract as buildIssueBody emits).
+  const prevMarker = (issue.body ?? '').match(/<!-- monitor-fingerprint: (\S+) -->/)?.[1];
+  const prevFingerprint = prevMarker
+    ? Buffer.from(prevMarker, 'base64').toString('utf8')
+    : undefined;
   if (prevFingerprint === fingerprint) {
     console.log('[monitor-issue] failure set UNCHANGED - issue left untouched (no spam)');
     return;
