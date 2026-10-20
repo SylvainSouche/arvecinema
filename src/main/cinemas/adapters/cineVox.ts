@@ -291,12 +291,17 @@ const plugin: CinemaAdapterPlugin = {
 
                 // Override version detection from the URL if available — the
                 // URL is more reliable than the .celtags img (which can be
-                // missing on some rows).
+                // missing on some rows). This feeds BOTH the per-showtime
+                // tags and the movie-level hasVF/hasVO flags (before the
+                // CMB-020 fix the flags were img-only, so pages that encode
+                // versions solely in booking URLs showed no VF/VO badges).
                 const tags: string[] = [];
                 if (versionFromUrl === 'VO') {
                   tags.push('Localization.Version.Original');
+                  hasVO = true;
                 } else if (versionFromUrl === 'VF') {
                   tags.push('Localization.Language.French');
+                  hasVF = true;
                 } else {
                   if (rowIsVF) tags.push('Localization.Language.French');
                   if (rowIsVO) tags.push('Localization.Version.Original');
