@@ -83,6 +83,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       stillFailing: number;
     }>,
 
+  /** Invalidate the ratings caches: main process deletes every ratings_cache
+   *  row (AlloCiné, RT, per-film IMDb). Trigger a schedule refresh right
+   *  after — the enrichment then re-scrapes all sources from scratch.
+   *  Returns { cleared } — the number of cache rows removed. */
+  invalidateRatingsCache: () =>
+    ipcRenderer.invoke('ratings:invalidate-cache') as Promise<{ cleared: number }>,
+
   /** Get all captured log entries from the main process. */
   getLogs: () => ipcRenderer.invoke('log:get-all'),
   /** Clear the log buffer in the main process. */

@@ -231,6 +231,24 @@ export function registerIpcHandlers(deps: IpcRegistrarDeps): void {
     },
   );
 
+  // ── IPC: invalidate the ratings caches ("invalidate caches" button) ──────
+  //
+  // Deletes every ratings_cache row (AlloCiné, RT, and the per-film IMDb
+  // entries) so the NEXT refresh re-scrapes all sources from scratch — the
+  // escape hatch when cached data is wrong (e.g. a scraper bug recorded
+  // ratings as 'absent'). The renderer triggers the refresh itself right
+  // after this resolves. No payload to sanitize; the sender check is the
+  // boundary (a forged call must not be able to wipe the cache).
+  ipcMain.handle('ratings:invalidate-cache', async (evt): Promise<{ cleared: number }> => {
+    if (!isKnownRendererSender(evt)) {
+      log.enricher.warn('[ratings:invalidate-cache] rejected unknown sender webContents');
+      return { cleared: 0 };
+    }
+    // Lazy-load, same rationale as ratings:retry.
+    const { invalidateRatingsCaches } = await import('../ratings/ratingsFetcher');
+    return { cleared: invalidateRatingsCaches() };
+  });
+
   // ── IPC: open a ticketing URL in the user's default browser (CMB-008) ────
   //
   // Ticketing URLs come from remote cinema data and are validated to HTTPS;

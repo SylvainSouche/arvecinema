@@ -61,6 +61,11 @@ describe('security contract: IPC validation boundary wired in the registrar', ()
     expect(fetchGuard).toBeTruthy();
     const retryGuard = s.match(/ratings:retry[\s\S]{0,1200}isKnownRendererSender\(evt\)/);
     expect(retryGuard).toBeTruthy();
+    // …and in the destructive one (wipes the ratings cache).
+    const invalidateGuard = s.match(
+      /ratings:invalidate-cache[\s\S]{0,600}isKnownRendererSender\(evt\)/,
+    );
+    expect(invalidateGuard).toBeTruthy();
   });
 });
 

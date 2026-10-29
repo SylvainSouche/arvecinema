@@ -44,7 +44,18 @@ const h = vi.hoisted(() => {
       stillFailing: 0,
     }),
   );
-  return { handlers, sent, fakeWindows, openExternal, fetchSchedule1, fetchSchedule2, saveCustom, retryFailedLookups };
+  const invalidateRatingsCaches = vi.fn(() => 7);
+  return {
+    handlers,
+    sent,
+    fakeWindows,
+    openExternal,
+    fetchSchedule1,
+    fetchSchedule2,
+    saveCustom,
+    retryFailedLookups,
+    invalidateRatingsCaches,
+  };
 });
 
 vi.mock('electron', () => ({
@@ -81,6 +92,7 @@ vi.mock('../../../src/main/ratings/ratingsEnricher', () => ({
 }));
 vi.mock('../../../src/main/ratings/ratingsFetcher', () => ({
   retryFailedLookups: h.retryFailedLookups,
+  invalidateRatingsCaches: h.invalidateRatingsCaches,
 }));
 vi.mock('../../../src/main/ratings/logger', () => ({
   getAllLogs: () => [] as string[],
@@ -113,6 +125,7 @@ const EXPECTED_CHANNELS = [
   'schedule:fetch',
   'dev:export-all',
   'ratings:retry',
+  'ratings:invalidate-cache',
   'tickets:open',
   'dev:get-network-state',
   'log:get-all',
@@ -129,6 +142,7 @@ beforeEach(() => {
   h.fetchSchedule2.mockClear();
   h.saveCustom.mockClear();
   h.retryFailedLookups.mockClear();
+  h.invalidateRatingsCaches.mockClear();
   registerIpcHandlers({ customCinemasFile: () => 'custom.json', notifyCinemasChanged: vi.fn() });
 });
 
@@ -217,6 +231,20 @@ describe('ipcRegistrar: ratings:retry', () => {
     };
     expect(res.retried).toBe(0);
     expect(h.retryFailedLookups).not.toHaveBeenCalled();
+  });
+});
+
+describe('ipcRegistrar: ratings:invalidate-cache', () => {
+  it('delegates to invalidateRatingsCaches and returns the row count', async () => {
+    const res = (await call('ratings:invalidate-cache')(senderEvent)) as { cleared: number };
+    expect(res).toEqual({ cleared: 7 });
+    expect(h.invalidateRatingsCaches).toHaveBeenCalledTimes(1);
+  });
+
+  it('unknown senders are rejected (a forged call must not wipe the cache)', async () => {
+    const res = (await call('ratings:invalidate-cache')({ sender: {} })) as { cleared: number };
+    expect(res).toEqual({ cleared: 0 });
+    expect(h.invalidateRatingsCaches).not.toHaveBeenCalled();
   });
 });
 

@@ -214,6 +214,11 @@ declare global {
           rtStatus?: string;
         }>,
       ) => Promise<{ retried: number; succeeded: number; stillFailing: number }>;
+      /** Invalidate the ratings caches: main process deletes every
+       *  ratings_cache row (AlloCiné, RT, per-film IMDb). Trigger a schedule
+       *  refresh right after — enrichment re-scrapes all sources from
+       *  scratch. Returns { cleared } — rows removed. */
+      invalidateRatingsCache: () => Promise<{ cleared: number }>;
       /** Get all captured log entries from the main process.
        *  Each entry has { timestamp, level, component, message } where
        *  level is 'debug' | 'info' | 'warn' | 'error'. */

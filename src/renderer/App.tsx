@@ -20,6 +20,7 @@ import { useTheme } from './hooks/useTheme';
 import { useSchedule } from './hooks/useSchedule';
 import { useRatingsIPC } from './hooks/useRatingsIPC';
 import { useRetryFailedLookups } from './hooks/useRetryFailedLookups';
+import { useInvalidateCaches } from './hooks/useInvalidateCaches';
 import { buttonStyles as btn, dragRegion, noDragRegion } from './styles/components';
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -65,18 +66,24 @@ export const App: React.FC = () => {
   const { progress, networkActive } = useRatingsIPC(setMovies);
 
   // ── Retry failed lookups ────────────────────────────────────────────────────
+  // 'absent' counts as failed too: it is not always a fact about the film —
+  // a source can record 'absent' from a degraded response (e.g. AlloCiné
+  // serving a page with the rating widget stripped). Retrying re-checks it.
   const blockedCount = useMemo(
     () =>
       movies.reduce((sum, m) => {
         let n = 0;
-        if (m.imdbStatus === 'blocked') n++;
-        if (m.allocineStatus === 'blocked') n++;
-        if (m.rtStatus === 'blocked') n++;
+        if (m.imdbStatus === 'blocked' || m.imdbStatus === 'absent') n++;
+        if (m.allocineStatus === 'blocked' || m.allocineStatus === 'absent') n++;
+        if (m.rtStatus === 'blocked' || m.rtStatus === 'absent') n++;
         return sum + n;
       }, 0),
     [movies],
   );
   const { retryState, handleRetry } = useRetryFailedLookups(movies, blockedCount);
+  // `reload` (not the `refresh` alias — declared later) so the hook's
+  // deps stay in scope; it's a stable useCallback in useSchedule.
+  const { invalidateState, handleInvalidate } = useInvalidateCaches(reload, networkActive);
 
   // ── UI state (filters, view mode, day selection) ───────────────────────────
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
@@ -469,6 +476,61 @@ export const App: React.FC = () => {
               />
             ) : (
               <span aria-hidden>↻</span>
+            )}
+          </button>
+          {/* Invalidate caches — wipes the ratings cache (AlloCiné, RT, and
+              the per-film IMDb entries). The automatic refresh that follows
+              re-scrapes every source from scratch: the escape hatch when
+              cached data is wrong (e.g. a scraper bug recorded ratings as
+              'absent'). Disabled while network activity is in flight —
+              never wipe the cache mid-enrichment. While the wipe request is
+              in progress, shows a spinner; for 4s after completion the
+              title shows how many rows were cleared. */}
+          <button
+            type="button"
+            onClick={handleInvalidate}
+            disabled={networkActive || invalidateState?.inProgress === true}
+            aria-label={t('invalidateCache')}
+            title={
+              invalidateState && !invalidateState.inProgress
+                ? tFmt('invalidateCacheDone', { cleared: invalidateState.cleared })
+                : t('invalidateCacheTooltip')
+            }
+            style={{
+              ...btn.header,
+              position: 'relative',
+              color:
+                invalidateState && !invalidateState.inProgress
+                  ? 'var(--brand-success)' // green — caches cleared
+                  : undefined,
+              borderColor:
+                invalidateState && !invalidateState.inProgress
+                  ? 'rgba(16, 185, 129, 0.4)'
+                  : undefined,
+              cursor: networkActive || invalidateState?.inProgress === true ? 'wait' : 'pointer',
+              opacity: networkActive || invalidateState?.inProgress === true ? 0.6 : 1,
+            }}
+          >
+            {invalidateState?.inProgress === true ? (
+              <span
+                aria-hidden
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  width: 14,
+                  height: 14,
+                  marginTop: -7,
+                  marginLeft: -7,
+                  borderRadius: '50%',
+                  border: '2px solid var(--border-light)',
+                  borderTopColor: 'var(--brand-accent)',
+                  animation: 'arve-spin 0.8s linear infinite',
+                  boxSizing: 'border-box',
+                }}
+              />
+            ) : (
+              <span aria-hidden>🧹</span>
             )}
           </button>
           {/* Retry failed rating lookups — only visible when at least one
