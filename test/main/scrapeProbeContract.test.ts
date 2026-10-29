@@ -13,7 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { buildUserAgent, buildProbeTargets, runProbe, validateBoxofficeSchedule, validateHtmlReachable } from '../../scripts/scrape-probe.mjs';
+import { buildUserAgent, buildProbeTargets, runProbe, validateBoxofficeSchedule, validateHtmlReachable, validateAllocineFichefilm } from '../../scripts/scrape-probe.mjs';
 
 const probeSource = readFileSync(
   path.join(process.cwd(), 'scripts/scrape-probe.mjs'),
@@ -67,6 +67,7 @@ describe('scrape-probe: UA + rating sources mirror the app', () => {
     expect(ids).toEqual([
       'ratings:wikidata',
       'ratings:allocine-search',
+      'ratings:allocine-fichefilm',
       'ratings:rottentomatoes',
       'ratings:imdb-title',
       'ratings:imdb-datasets',
@@ -76,6 +77,10 @@ describe('scrape-probe: UA + rating sources mirror the app', () => {
     expect(probeSource).not.toContain('query.wikidata.org');
     // AlloCiné probe tracks the app's LIVE protocol endpoint…
     expect(probeSource).toContain('/recherche/?q=');
+    // …and the ratings endpoint is pinned by its invariant (rating widget),
+    // because a 200-but-widget-less page is how the cache got poisoned.
+    expect(probeSource).toContain('fichefilm_gen_cfilm=');
+    expect(probeSource).toContain('stareval');
   });
 
   it('fetchable JSON/HTML targets have invariant validators (no 200-but-useless passes)', () => {
@@ -87,6 +92,7 @@ describe('scrape-probe: UA + rating sources mirror the app', () => {
     expect(validating).toContain('cinema:chamonix');
     expect(validating).toContain('ratings:wikidata');
     expect(validating).toContain('ratings:rottentomatoes');
+    expect(validating).toContain('ratings:allocine-fichefilm');
     expect(targets.find((t) => t.id === 'ratings:imdb-title')?.parseBody).toBeFalsy();
     expect(targets.find((t) => t.id === 'ratings:imdb-datasets')?.parseBody).toBeFalsy();
   });
@@ -161,6 +167,47 @@ describe('scrape-probe: challenge-page detection (HTML sources)', () => {
     const page = '<html><body><h1>Séances</h1>' + '<p>séance</p>'.repeat(2000) +
       '<script src="https://www.gstatic.com/recaptcha/releases/x/recaptcha__fr.js" async></script></body></html>';
     expect(validateHtmlReachable(page, 'x').state).toBe('healthy');
+  });
+});
+
+describe('scrape-probe: allocine fichefilm validator (rating-widget invariant)', () => {
+  const filmPage = (extra = '') =>
+    `<html><head><meta property="og:title" content="X"/><script type="application/ld+json">{"@type":"Movie"}</script></head><body>${extra}${'<p>synopsis</p>'.repeat(200)}</body></html>`;
+
+  it('HEALTHY: film page with the stareval rating widget', () => {
+    const v = validateAllocineFichefilm(filmPage('<div class="stareval-stars"></div>'));
+    expect(v.state).toBe('healthy');
+    expect(v.detail).toContain('rating widget present');
+  });
+
+  it('DEGRADED: 200 film page WITHOUT the rating widget (bot-mitigation variant, 2026-10-28 failure)', () => {
+    const v = validateAllocineFichefilm(filmPage());
+    expect(v.state).toBe('degraded');
+    expect(v.detail).toContain('rating widget');
+  });
+
+  it('DEGRADED: the embedded CSS mention of stareval is not the widget', () => {
+    // cfilm=323550's stripped page contains exactly one 'stareval' — the
+    // .stareval-note CSS definition — and must still be degraded.
+    const v = validateAllocineFichefilm(
+      filmPage().replace('</head>', '<style>.entity-card .stareval-note{font-size:1rem}</style></head>'),
+    );
+    expect(v.state).toBe('degraded');
+  });
+
+  it('DEGRADED: challenge shell wins over shape checks', () => {
+    const v = validateAllocineFichefilm(filmPage('<div class="stareval-stars"></div>').replace('<head>', '<head>Just a moment...'));
+    expect(v.state).toBe('degraded');
+  });
+
+  it('BROKEN: not a fichefilm page (no og:title, no ld+json Movie)', () => {
+    const v = validateAllocineFichefilm('<html><body>' + '<p>menu</p>'.repeat(200) + '</body></html>');
+    expect(v.state).toBe('broken');
+  });
+
+  it('BROKEN: empty/too-small body', () => {
+    expect(validateAllocineFichefilm('').state).toBe('broken');
+    expect(validateAllocineFichefilm('<html></html>').state).toBe('broken');
   });
 });
 

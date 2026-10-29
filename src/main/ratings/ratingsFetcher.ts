@@ -5,6 +5,7 @@ import {
   getRatingsCacheEntry,
   upsertRatingsCacheEntry,
   getIdsCacheEntryByQid,
+  clearRatingsCache,
   type RatingsCacheRow,
 } from './cacheDb';
 import { isCancelled } from './shutdown';
@@ -222,7 +223,8 @@ export const ratingsFetcher: RatingsFetcher = {
         existing.imdbUrl = `https://www.imdb.com/title/${movie.imdbId}/`;
         existing.imdbStatus = 'ok';
         existing.imdbStatusMessage = undefined;
-        existing.fetchedAt = new Date().toISOString();
+        // Preserve fetched_at — same reason as batchImdbLookup: renewing it
+        // here would suppress the next Phase 2 scrape of AC/RT.
         writeRatingsCacheEntry(qid, existing);
         applyRatings(movie, { qid, imdbId: movie.imdbId } as IdsCacheEntry, existing);
         onUpdated(movie);
@@ -254,13 +256,18 @@ export const ratingsFetcher: RatingsFetcher = {
     for (const [imdbId, entry] of datasetResults) {
       const item = movieByImdbId.get(imdbId);
       if (!item) continue;
+      // Preserve the entry's fetched_at: renewing it here would make the
+      // whole entry (incl. AlloCiné/RT fields) look fresh to Phase 2's
+      // isFresh() check, so Phase 2 would skip scraping them — and since
+      // this lookup runs whenever an entry goes stale, AC/RT would then
+      // NEVER be re-scraped. fetched_at is Phase 2's scrape-cycle clock;
+      // only Phase 2 itself may renew it.
       const cached = readRatingsCacheEntry(item.ids.qid) ?? { fetchedAt: new Date().toISOString() };
       cached.imdbRating = entry.rating;
       cached.imdbVotes = entry.votes;
       cached.imdbUrl = `https://www.imdb.com/title/${imdbId}/`;
       cached.imdbStatus = 'ok';
       cached.imdbStatusMessage = undefined;
-      cached.fetchedAt = new Date().toISOString();
       writeRatingsCacheEntry(item.ids.qid, cached);
       applyRatings(item.movie, item.ids, cached);
       onUpdated(item.movie);
@@ -294,20 +301,25 @@ export const ratingsFetcher: RatingsFetcher = {
   },
 };
 
-// ── Retry: re-fetch only sources that previously failed with status='blocked' ──
+// ── Retry: re-fetch sources that previously failed ('blocked' or 'absent') ──
 //
 // The retry path differs from the normal Phase 2 in three ways:
 //   1. It iterates over movies already in the renderer's state (passed in
 //      by the caller), not over the original Phase 0/1 ratingsQueue.
 //   2. For each movie, it ONLY fetches sources whose current status is
-//      'blocked' — leaving 'ok' and 'absent' untouched.
+//      'blocked' or 'absent' — leaving 'ok' untouched. 'absent' is included
+//      because it is not always a fact about the film: AlloCiné sometimes
+//      serves a page without the rating widget (bot mitigation), which used
+//      to be recorded as 'absent' and would then never be re-checked (the
+//      24h TTL alone re-scrapes it, but a user-visible retry must too).
 //   3. It always re-scrapes, ignoring the freshness TTL — the user explicitly
 //      asked for a retry, so we honor that even if the cache is "fresh"
 //      (which can happen if the previous failed attempt wrote a 'blocked'
 //      entry and the 24h TTL hasn't elapsed).
 
 /**
- * Re-fetch ratings for sources that previously returned status='blocked'.
+ * Re-fetch ratings for sources that previously returned status='blocked' or
+ * status='absent'.
  *
  * @param movies    The movies currently displayed in the UI (mutated in place + onUpdated fired per update).
  * @param onUpdated Callback fired after each movie's ratings are updated.
@@ -319,11 +331,11 @@ export async function retryFailedLookups(
   onUpdated: (movie: Movie) => void,
   onProgress: () => void,
 ): Promise<{ retried: number; succeeded: number; stillFailing: number }> {
-  debug(`retry: scanning ${movies.length} movies for blocked sources`);
+  debug(`retry: scanning ${movies.length} movies for failed sources`);
 
   // Build a queue of { movie, ids, sourcesToRetry } for movies that have
-  // at least one blocked source AND a known QID (we need the QID to read
-  // and write the ratings cache).
+  // at least one failed (blocked/absent) source AND a known QID (we need the
+  // QID to read and write the ratings cache).
   const retryQueue: Array<{
     movie: Movie;
     ids: IdsCacheEntry;
@@ -355,23 +367,24 @@ export async function retryFailedLookups(
       allocineId: idsRow.allocine_id ?? undefined,
     };
 
-    // Determine which sources are currently blocked.
-    const blocked: string[] = [];
-    if (movie.imdbStatus === 'blocked') blocked.push('imdb');
-    if (movie.allocineStatus === 'blocked') blocked.push('allocine');
-    if (movie.rtStatus === 'blocked') blocked.push('rt');
+    // Determine which sources failed (blocked or absent — see doc above).
+    const failing: string[] = [];
+    if (movie.imdbStatus === 'blocked' || movie.imdbStatus === 'absent') failing.push('imdb');
+    if (movie.allocineStatus === 'blocked' || movie.allocineStatus === 'absent')
+      failing.push('allocine');
+    if (movie.rtStatus === 'blocked' || movie.rtStatus === 'absent') failing.push('rt');
 
-    if (blocked.length === 0) continue;
+    if (failing.length === 0) continue;
 
-    retryQueue.push({ movie, ids, sourcesToRetry: blocked });
+    retryQueue.push({ movie, ids, sourcesToRetry: failing });
   }
 
   if (retryQueue.length === 0) {
-    debug('retry: no blocked sources to retry');
+    debug('retry: no failed sources to retry');
     return { retried: 0, succeeded: 0, stillFailing: 0 };
   }
 
-  debug(`retry: ${retryQueue.length} movies with blocked sources, re-fetching...`);
+  debug(`retry: ${retryQueue.length} movies with failed sources, re-fetching...`);
 
   let succeeded = 0;
   let stillFailing = 0;
@@ -394,7 +407,8 @@ export async function retryFailedLookups(
 }
 
 /** Worker that processes the retry queue. For each item, only re-fetches the
- *  sources whose status is 'blocked'. Updates the cache + movie in place. */
+ *  sources whose status is 'blocked' or 'absent'. Updates the cache + movie
+ *  in place. */
 async function processRetryQueue(
   queue: Array<{ movie: Movie; ids: IdsCacheEntry; sourcesToRetry: string[] }>,
   onUpdated: (movie: Movie) => void,
@@ -465,6 +479,30 @@ async function processRetryQueue(
       debug(`retry: "${movie.title}" recovered at least one source`);
     }
   }
+}
+
+// ── Cache invalidation ("invalidate caches" button) ────────────────────────
+
+/**
+ * Drop the entire ratings cache (all sources) + the in-flight dedup map.
+ *
+ * The next enrichment's Phase 2 then re-scrapes AlloCiné/RT for every film
+ * from an empty cache. The IMDb dataset table (imdb_ratings) is deliberately
+ * kept — it has its own 36h refresh cycle and re-applying it is instant and
+ * free. ids_cache is permanent by design (IDs don't change).
+ *
+ * Race note: an enrichment already mid-flight holds its entry objects in
+ * memory and will write them back when it finishes — the UI disables this
+ * action while network activity is in flight, and a residual write-back is
+ * self-correcting (the next invalidation clears it again).
+ *
+ * @returns The number of cached rating rows removed.
+ */
+export function invalidateRatingsCaches(): number {
+  inflightRatings.clear();
+  const cleared = clearRatingsCache();
+  log.ratingsFetcher.info(`[ratings-fetcher] cache invalidated — ${cleared} rows cleared, sources will re-scrape on next refresh`);
+  return cleared;
 }
 
 // ── Phase 2 worker — iterates over RATING_SOURCES (pluggable) ─────────────

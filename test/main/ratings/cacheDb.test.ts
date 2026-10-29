@@ -51,6 +51,7 @@ import {
   upsertIdsCacheEntry,
   getRatingsCacheEntry,
   upsertRatingsCacheEntry,
+  clearRatingsCache,
   getImdbRating,
   getImdbRatingsBatch,
   getImdbRatingCount,
@@ -58,6 +59,7 @@ import {
   getSchemaVersion,
   isCacheDbAvailable,
 } from '../../../src/main/ratings/cacheDb';
+import Database from 'better-sqlite3';
 
 beforeEach(() => {
   fs.mkdirSync(USER_DATA_DIR, { recursive: true });
@@ -74,9 +76,9 @@ afterEach(() => {
 });
 
 describe('initCacheDb', () => {
-  it('opens the DB and creates all v1 tables', () => {
+  it('opens the DB and creates the tables at the current schema version', () => {
     expect(isCacheDbAvailable()).toBe(true);
-    expect(getSchemaVersion()).toBe(1);
+    expect(getSchemaVersion()).toBe(2);
   });
 
   it('is idempotent', () => {
@@ -86,9 +88,77 @@ describe('initCacheDb', () => {
   });
 });
 
+describe('migration v1 → v2: reset poisoned AlloCiné absent entries', () => {
+  /** Rebuild a raw v1 database containing a poisoned 'absent' row (the
+   *  2026-10-28 AlloCiné bot-mitigation incident), then let initCacheDb
+   *  migrate it. */
+  function seedV1Db(): void {
+    closeCacheDb();
+    for (const file of fs.readdirSync(USER_DATA_DIR)) {
+      if (file.startsWith('cache.db')) fs.unlinkSync(path.join(USER_DATA_DIR, file));
+    }
+    const raw = new Database(path.join(USER_DATA_DIR, 'cache.db'));
+    raw.exec(`
+      CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
+      CREATE TABLE ratings_cache (
+        qid TEXT PRIMARY KEY,
+        imdb_rating REAL, imdb_votes INTEGER, imdb_url TEXT,
+        imdb_status TEXT, imdb_status_message TEXT,
+        allocine_press REAL, allocine_audience REAL, allocine_votes INTEGER,
+        allocine_url TEXT, allocine_status TEXT, allocine_status_message TEXT,
+        rt_tomatometer INTEGER, rt_certified_fresh INTEGER, rt_url TEXT,
+        rt_status TEXT, rt_status_message TEXT,
+        fetched_at TEXT NOT NULL
+      ) WITHOUT ROWID;
+      CREATE TABLE ids_cache (
+        cache_key TEXT PRIMARY KEY, qid TEXT NOT NULL, title TEXT NOT NULL,
+        imdb_id TEXT, tmdb_id TEXT, rt_path TEXT, allocine_id TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      ) WITHOUT ROWID;
+      CREATE TABLE imdb_ratings (tconst TEXT PRIMARY KEY, rating REAL NOT NULL, votes INTEGER NOT NULL) WITHOUT ROWID;
+    `);
+    raw.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '1')").run();
+    // The poisoned row: allocine 'absent' (bogus — the film HAS ratings),
+    // imdb + rt data present, fetched_at renewed by Phase 1.5.
+    raw.prepare(
+      `INSERT INTO ratings_cache
+         (qid, imdb_rating, imdb_status, rt_status, allocine_status, allocine_status_message, fetched_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run('QPOISON', 7.1, 'ok', 'ok', 'absent', 'Pas de note presse ni spectateurs sur AlloCiné', '2026-10-28T15:56:06.594Z');
+    // A healthy row must survive untouched.
+    raw.prepare(
+      `INSERT INTO ratings_cache
+         (qid, imdb_rating, imdb_status, allocine_press, allocine_status, fetched_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run('QHEALTHY', 8.0, 'ok', 4.2, 'ok', '2026-10-28T15:56:06.594Z');
+    raw.close();
+  }
+
+  it('clears the allocine columns of absent rows, preserves everything else, stamps v2', () => {
+    seedV1Db();
+    initCacheDb();
+
+    expect(getMeta('schema_version')).toBe('2');
+
+    const poisoned = getRatingsCacheEntry('QPOISON');
+    expect(poisoned).not.toBeNull();
+    expect(poisoned!.allocine_status).toBeNull(); // reset → Phase 2 re-scrapes
+    expect(poisoned!.allocine_press).toBeNull();
+    expect(poisoned!.allocine_status_message).toBeNull();
+    expect(poisoned!.imdb_rating).toBe(7.1); // preserved
+    expect(poisoned!.imdb_status).toBe('ok');
+    expect(poisoned!.rt_status).toBe('ok');
+    expect(poisoned!.fetched_at).toBe('2026-10-28T15:56:06.594Z'); // untouched
+
+    const healthy = getRatingsCacheEntry('QHEALTHY');
+    expect(healthy!.allocine_status).toBe('ok');
+    expect(healthy!.allocine_press).toBe(4.2);
+  });
+});
+
 describe('meta table', () => {
   it('returns null for a non-existent key', () => {
-    expect(getMeta('nonExistentKey')).toBeNull();
+    expect(getMeta('nope')).toBeNull();
   });
 
   it('stores and retrieves a string value', () => {
@@ -103,7 +173,7 @@ describe('meta table', () => {
   });
 
   it('stores the schema_version key on init', () => {
-    expect(getMeta('schema_version')).toBe('1');
+    expect(getMeta('schema_version')).toBe('2');
   });
 });
 
@@ -255,6 +325,68 @@ describe('ratings_cache table', () => {
     expect(retrieved!.allocine_status).toBe('ok');
     expect(retrieved!.rt_tomatometer).toBe(75);
     expect(retrieved!.rt_status).toBe('ok');
+  });
+
+  it('clears a stale failure message when the source recovers (status update)', () => {
+    // Real regression: AlloCiné 'absent' + message was followed by a retry
+    // that recovered to 'ok' — the bare COALESCE kept the old failure
+    // message, producing status='ok' + "Pas de note presse ni spectateurs".
+    upsertRatingsCacheEntry({
+      qid: 'Q777',
+      allocine_status: 'absent',
+      allocine_status_message: 'Pas de note presse ni spectateurs sur AlloCiné',
+      allocine_url: 'https://www.allocine.fr/film/fichefilm_gen_cfilm=1.html',
+      fetched_at: '2026-10-28T15:00:00.000Z',
+    });
+
+    // Recovery: status becomes 'ok', message empty (source recovered).
+    upsertRatingsCacheEntry({
+      qid: 'Q777',
+      allocine_press: 3.1,
+      allocine_status: 'ok',
+      allocine_status_message: null,
+      fetched_at: '2026-10-29T15:00:00.000Z',
+    });
+
+    const retrieved = getRatingsCacheEntry('Q777');
+    expect(retrieved!.allocine_status).toBe('ok');
+    expect(retrieved!.allocine_status_message).toBeNull();
+    expect(retrieved!.allocine_press).toBe(3.1);
+  });
+
+  it('preserves the message when no status is provided (partial imdb update)', () => {
+    upsertRatingsCacheEntry({
+      qid: 'Q888',
+      allocine_status: 'absent',
+      allocine_status_message: 'Pas de note presse ni spectateurs sur AlloCiné',
+      fetched_at: '2026-10-28T15:00:00.000Z',
+    });
+    // Phase 1.5-style partial update: imdb fields only, no allocine status.
+    upsertRatingsCacheEntry({
+      qid: 'Q888',
+      imdb_rating: 7.2,
+      imdb_status: 'ok',
+      imdb_status_message: null,
+      fetched_at: '2026-10-29T15:00:00.000Z',
+    });
+    const retrieved = getRatingsCacheEntry('Q888');
+    expect(retrieved!.imdb_rating).toBe(7.2);
+    expect(retrieved!.allocine_status).toBe('absent');
+    expect(retrieved!.allocine_status_message).toBe('Pas de note presse ni spectateurs sur AlloCiné');
+  });
+
+  it('clearRatingsCache deletes every row and returns the count', () => {
+    upsertRatingsCacheEntry({ qid: 'QA', allocine_status: 'ok', allocine_press: 3.0, fetched_at: '2026-10-29T10:00:00.000Z' });
+    upsertRatingsCacheEntry({ qid: 'QB', imdb_status: 'ok', imdb_rating: 7.0, fetched_at: '2026-10-29T10:00:00.000Z' });
+    expect(getRatingsCacheEntry('QA')).not.toBeNull();
+
+    const cleared = clearRatingsCache();
+    expect(cleared).toBe(2);
+    expect(getRatingsCacheEntry('QA')).toBeNull();
+    expect(getRatingsCacheEntry('QB')).toBeNull();
+
+    // Idempotent: clearing an empty table returns 0.
+    expect(clearRatingsCache()).toBe(0);
   });
 
   it('handles null fields cleanly', () => {

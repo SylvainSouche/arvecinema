@@ -118,6 +118,33 @@ export function validateBoxofficeSchedule(bodyText, theaterId) {
   }
 }
 
+/** AlloCiné fichefilm validator: the invariant the ratings scraper relies on
+ *  is the rating WIDGET, not just reachability. A 200 page without it is how
+ *  a bot-mitigation variant / markup change silently poisons the ratings
+ *  cache with "absent" (observed 2026-10-28). The widget detector matches
+ *  widget MARKUP (`class="stareval…"`), not the bare string — every page
+ *  embeds the `.stareval-note` CSS definition, so a stripped page still
+ *  contains the word once. */
+export function validateAllocineFichefilm(bodyText) {
+  if (!bodyText || bodyText.length < 200) {
+    return { state: 'broken', detail: 'response too small to be a fichefilm page' };
+  }
+  const snippet = bodyText.slice(0, CHALLENGE_SCAN_BYTES).toLowerCase();
+  const hit = CHALLENGE_MARKERS.find((m) => snippet.includes(m));
+  if (hit) {
+    return { state: 'degraded', detail: `200 OK but response is a challenge page (marker: "${hit}") — browser-only path` };
+  }
+  const looksLikeFilmPage =
+    bodyText.includes('property="og:title"') || /"@type"\s*:\s*"Movie"/.test(bodyText);
+  if (!looksLikeFilmPage) {
+    return { state: 'broken', detail: 'no og:title / ld+json Movie — not a fichefilm page (redirect or interstitial?)' };
+  }
+  if (!/class="[^"]*stareval/.test(bodyText)) {
+    return { state: 'degraded', detail: 'film page without rating widget — bot-mitigation variant or AlloCiné markup change (scraper would record "absent")' };
+  }
+  return { state: 'healthy', detail: `fichefilm reachable, rating widget present (${Math.round(bodyText.length / 1024)} KB)` };
+}
+
 /** HTML source validator: reachable-but-challenge detection. */
 export function validateHtmlReachable(bodyText, label) {
   const snippet = bodyText.slice(0, CHALLENGE_SCAN_BYTES).toLowerCase();
@@ -205,6 +232,20 @@ export function buildProbeTargets(cinemas) {
       url: 'https://www.allocine.fr/recherche/?q=cinema',
       headers: {},
       expect: 'ok',
+    },
+    {
+      id: 'ratings:allocine-fichefilm',
+      group: 'ratings',
+      // The ratings endpoint (allocineClient.fetchAllocineRatings): a stable
+      // catalog film that will always have press + audience ratings. The
+      // invariant is the RATING WIDGET, not just reachability — a 200 page
+      // with the widget stripped (bot-mitigation variant observed 2026-10-28)
+      // is exactly the failure that silently poisoned the ratings cache.
+      url: 'https://www.allocine.fr/film/fichefilm_gen_cfilm=2072.html',
+      headers: {},
+      expect: 'ok',
+      parseBody: true,
+      validate: (bodyText) => validateAllocineFichefilm(bodyText),
     },
     {
       id: 'ratings:rottentomatoes',

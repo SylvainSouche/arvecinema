@@ -41,6 +41,30 @@ export interface AllocineResult {
   statusMessage?: string;
 }
 
+/** Classify the fetched HTML before trusting a "no ratings" conclusion.
+ *
+ *  A fichefilm page without the rating widget is NOT proof the film has no
+ *  ratings: AlloCiné's bot mitigation sometimes serves a 200 page with the
+ *  widget stripped (observed 2026-10-28: a burst of film pages came back
+ *  without any rating cards; the same URLs served full pages minutes
+ *  later). Recording that as 'absent' poisons the cache for 24h+.
+ *
+ *  The widget detector matches WIDGET MARKUP (`class="stareval…"`), not the
+ *  bare string: every page embeds the `.stareval-note` CSS definition, so a
+ *  stripped page still contains the word once.
+ *
+ *    'has-ratings'      → widget markup present — parse it
+ *    'valid-no-ratings' → genuine film page (og:title / ld+json Movie), no
+ *                         rating cards — the film really has no ratings
+ *    'invalid-page'     → neither: challenge shell, consent wall, error
+ *                         page — treat as 'blocked' (retryable) */
+export function classifyAllocineHtml(html: string): 'has-ratings' | 'valid-no-ratings' | 'invalid-page' {
+  if (/class="[^"]*stareval/.test(html)) return 'has-ratings';
+  const looksLikeFilmPage =
+    html.includes('property="og:title"') || /"@type"\s*:\s*"Movie"/.test(html);
+  return looksLikeFilmPage ? 'valid-no-ratings' : 'invalid-page';
+}
+
 export async function fetchAllocineRatings(cfilmId: string): Promise<AllocineResult | null> {
   const url = `${ALLOCINE_BASE}/film/fichefilm_gen_cfilm=${cfilmId}.html`;
 
@@ -66,7 +90,27 @@ export async function fetchAllocineRatings(cfilmId: string): Promise<AllocineRes
           statusMessage: 'Cloudflare a bloqué la requête',
         };
       }
+    } else if (classifyAllocineHtml(html) === 'invalid-page') {
+      // 200 but neither a film page nor a recognized challenge — bot mitigation
+      // variant. A real browser session may still get the widget.
+      if (DEBUG)
+        log.allocine.info(
+          `[allocine] unrecognized page for ${cfilmId} (${html.length} bytes) — trying browserFetch`,
+        );
+      const rendered = await browserFetch(url, { headers: HEADERS });
+      if (classifyAllocineHtml(rendered) !== 'invalid-page') {
+        html = rendered;
+      } else {
+        return {
+          url,
+          status: 'blocked',
+          statusMessage: 'Réponse AlloCiné non reconnue (protection anti-robot ?)',
+        };
+      }
     }
+    // classifyAllocineHtml(html) === 'valid-no-ratings' → genuine film page
+    // without rating cards; fall through to the extraction, which will
+    // correctly return 'absent'.
 
     // In debug mode, save the raw response for inspection.
     if (DEBUG) {
@@ -101,10 +145,15 @@ export async function fetchAllocineRatings(cfilmId: string): Promise<AllocineRes
       status: 'ok',
     };
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // pooledFetch throws (it does not return bodies) on HTTP errors and on its
+    // Cloudflare-challenge detection. Those are transient blocks — record them
+    // as 'blocked' (retryable) rather than 'absent' (a fact about the film).
+    const blocked = /Cloudflare challenge|HTTP 4[0-9]{2}|HTTP 5[0-9]{2}|TimeoutError/i.test(message);
     return {
       url,
-      status: 'absent',
-      statusMessage: `Erreur réseau : ${err instanceof Error ? err.message : String(err)}`,
+      status: blocked ? 'blocked' : 'absent',
+      statusMessage: blocked ? `Requête bloquée : ${message}` : `Erreur réseau : ${message}`,
     };
   }
 }

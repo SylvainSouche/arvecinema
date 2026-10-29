@@ -18,6 +18,11 @@ export declare function validateHtmlReachable(
   detail: string;
   stats?: never;
 };
+export declare function validateAllocineFichefilm(bodyText: string): {
+  state: 'healthy' | 'degraded' | 'broken' | 'unknown';
+  detail: string;
+  stats?: never;
+};
 export declare interface ProbeTarget {
   id: string;
   group: 'cinemas' | 'ratings';

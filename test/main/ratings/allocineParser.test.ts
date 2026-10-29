@@ -20,7 +20,11 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { extractRatingBySection, extractVoteCount } from '../../../src/main/ratings/allocineClient';
+import {
+  extractRatingBySection,
+  extractVoteCount,
+  classifyAllocineHtml,
+} from '../../../src/main/ratings/allocineClient';
 
 // Load the real AlloCiné HTML fixture
 const fixturePath = path.resolve(__dirname, '../../fixtures/allocine-matrix.html');
@@ -110,5 +114,39 @@ describe('AlloCiné parser — edge cases', () => {
     `;
     // n99 = 9.9 — outside 0-5 range, should be rejected
     expect(extractRatingBySection(html, 'Presse')).toBeUndefined();
+  });
+});
+
+describe('AlloCiné page classification (degraded-response guard)', () => {
+  // 2026-10-28: a burst of fichefilm requests came back 200 with the rating
+  // widget stripped (bot mitigation). Recording that as 'absent' ("the film
+  // has no ratings") poisoned the ratings cache — the classifier exists so
+  // fetchAllocineRatings can tell the three cases apart.
+  it('page with stareval markup → has-ratings', () => {
+    expect(classifyAllocineHtml('<div class="stareval stareval-small">3,9</div>')).toBe('has-ratings');
+  });
+
+  it('CSS-only mention of stareval is NOT the widget (every page embeds the CSS)', () => {
+    // Real case: cfilm=323550's stripped page contains exactly one 'stareval'
+    // occurrence — inside the embedded <style> block. A bare-string check
+    // would classify it has-ratings and record 'absent' again.
+    const html = '<html><head><meta property="og:title" content="X"/>' +
+      '<style>.entity-card .stareval-note{font-size:1rem}</style></head><body><p>synopsis</p></body></html>';
+    expect(html).toContain('stareval'); // precondition: bare string present
+    expect(classifyAllocineHtml(html)).toBe('valid-no-ratings');
+  });
+
+  it('genuine film page without rating cards → valid-no-ratings', () => {
+    // Real case: "L'Affaire Marie-Claire" (cfilm=323550) — valid page, film
+    // simply has no ratings yet.
+    const html = '<html><head><meta property="og:title" content="L\'Affaire Marie-Claire"/>' +
+      '<script type="application/ld+json">{"@type":"Movie"}</script></head><body><p>synopsis</p></body></html>';
+    expect(classifyAllocineHtml(html)).toBe('valid-no-ratings');
+  });
+
+  it('challenge shell / interstitial → invalid-page (recorded as blocked, retryable)', () => {
+    expect(classifyAllocineHtml('<html><body>Just a moment...</body></html>')).toBe('invalid-page');
+    expect(classifyAllocineHtml('<html><body><div id="cf-challenge"></div></body></html>')).toBe('invalid-page');
+    expect(classifyAllocineHtml('')).toBe('invalid-page');
   });
 });

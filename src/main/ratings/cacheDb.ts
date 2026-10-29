@@ -89,7 +89,7 @@ function openDb(): Database | null {
 
 /** Current schema version. Bump this when the schema changes.
  *  Migration functions for each version bump are defined below. */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 /** Read the stored schema version from the meta table.
  *  Returns 0 if the meta table doesn't exist yet (fresh install). */
@@ -243,13 +243,39 @@ function runMigrations(): void {
       }
 
       // ── Future migrations go here ───────────────────────────────────
-      // Example for when we bump to v2:
       //
-      // if (stored < 2) {
-      //   log.cacheDb.info('[cache-db] migration v1 → v2: adding new_column to ratings_cache');
-      //   db.exec('ALTER TABLE ratings_cache ADD COLUMN new_column TEXT');
-      //   setStoredSchemaVersion(2);
-      // }
+      // ── Migration: v1 → v2 ──────────────────────────────────────────
+      // Reset AlloCiné entries recorded as 'absent'. 2026-10-28: AlloCiné's
+      // bot mitigation served a burst of film pages WITHOUT the rating
+      // widget (HTTP 200, valid-looking page) and the scraper recorded the
+      // missing ratings as 'absent' — a fact about the film — for films
+      // that DO have ratings. Worse, Phase 1.5 (IMDB dataset lookup)
+      // renewed fetched_at on stale entries, making those bogus 'absent'
+      // values look fresh to Phase 2 forever, so they were never
+      // re-scraped. Clearing the allocine columns makes the entry
+      // non-fresh (isFresh requires allocineStatus defined) → Phase 2
+      // re-scrapes AlloCiné on the next enrichment. IMDb/RT fields are
+      // preserved. Films that genuinely have no AlloCiné ratings get
+      // re-recorded 'absent' — one wasted request each, no data loss.
+      if (stored < 2) {
+        log.cacheDb.info(`[${ts()}] [cache-db] migration v1 → v2: resetting poisoned AlloCiné 'absent' entries`);
+        const result = db!
+          .prepare(
+            `UPDATE ratings_cache SET
+               allocine_press = NULL,
+               allocine_audience = NULL,
+               allocine_votes = NULL,
+               allocine_url = NULL,
+               allocine_status = NULL,
+               allocine_status_message = NULL
+             WHERE allocine_status = 'absent'`,
+          )
+          .run();
+        log.cacheDb.info(
+          `[${ts()}] [cache-db] migration v1 → v2: reset ${result.changes} AlloCiné entries for re-scrape`,
+        );
+        setStoredSchemaVersion(2);
+      }
     })();
     log.cacheDb.info(`[${ts()}] [cache-db] migration complete — now at v${SCHEMA_VERSION}`);
   } catch (err) {
@@ -386,6 +412,17 @@ export function getRatingsCacheEntry(qid: string): RatingsCacheRow | null {
   return (d.prepare('SELECT * FROM ratings_cache WHERE qid = ?').get(qid) as RatingsCacheRow | undefined) ?? null;
 }
 
+/** Delete every ratings_cache row. Used by the "invalidate caches" button:
+ *  the next enrichment's Phase 2 re-scrapes all sources (IMDb dataset values
+ *  still apply instantly from the imdb_ratings table — that dataset has its
+ *  own 36h refresh and is NOT touched here). Returns the number of rows
+ *  removed. */
+export function clearRatingsCache(): number {
+  const d = openDb();
+  if (!d) return 0;
+  return d.prepare('DELETE FROM ratings_cache').run().changes;
+}
+
 export function upsertRatingsCacheEntry(entry: Partial<RatingsCacheRow> & { qid: string }): void {
   const d = openDb();
   if (!d) return;
@@ -405,6 +442,13 @@ export function upsertRatingsCacheEntry(entry: Partial<RatingsCacheRow> & { qid:
   // We use COALESCE to fall back to the existing column value when the
   // caller passes null/undefined for a field. This way callers can pass
   // partial updates ("just update IMDB fields") without clobbering AC/RT.
+  //
+  // EXCEPTION — the *_status_message columns: when the caller provides a new
+  // status, the message follows it unconditionally (even when null). A bare
+  // COALESCE kept the PREVIOUS failure message after a source recovered to
+  // 'ok', producing rows like status='ok' + message="Pas de note presse ni
+  // spectateurs sur AlloCiné". When no status is provided, the message is
+  // preserved like every other field.
   d.prepare(`
     INSERT INTO ratings_cache (
       qid,
@@ -426,13 +470,19 @@ export function upsertRatingsCacheEntry(entry: Partial<RatingsCacheRow> & { qid:
       imdb_votes = COALESCE(@imdb_votes, imdb_votes),
       imdb_url = COALESCE(@imdb_url, imdb_url),
       imdb_status = COALESCE(@imdb_status, imdb_status),
-      imdb_status_message = COALESCE(@imdb_status_message, imdb_status_message),
+      imdb_status_message = CASE
+        WHEN @imdb_status IS NOT NULL THEN @imdb_status_message
+        ELSE COALESCE(@imdb_status_message, imdb_status_message)
+      END,
       allocine_press = COALESCE(@allocine_press, allocine_press),
       allocine_audience = COALESCE(@allocine_audience, allocine_audience),
       allocine_votes = COALESCE(@allocine_votes, allocine_votes),
       allocine_url = COALESCE(@allocine_url, allocine_url),
       allocine_status = COALESCE(@allocine_status, allocine_status),
-      allocine_status_message = COALESCE(@allocine_status_message, allocine_status_message),
+      allocine_status_message = CASE
+        WHEN @allocine_status IS NOT NULL THEN @allocine_status_message
+        ELSE COALESCE(@allocine_status_message, allocine_status_message)
+      END,
       rt_tomatometer = COALESCE(@rt_tomatometer, rt_tomatometer),
       rt_certified_fresh = CASE
         WHEN @rt_certified_fresh IS NULL THEN rt_certified_fresh
@@ -440,7 +490,10 @@ export function upsertRatingsCacheEntry(entry: Partial<RatingsCacheRow> & { qid:
       END,
       rt_url = COALESCE(@rt_url, rt_url),
       rt_status = COALESCE(@rt_status, rt_status),
-      rt_status_message = COALESCE(@rt_status_message, rt_status_message),
+      rt_status_message = CASE
+        WHEN @rt_status IS NOT NULL THEN @rt_status_message
+        ELSE COALESCE(@rt_status_message, rt_status_message)
+      END,
       fetched_at = COALESCE(@fetched_at, datetime('now'))
   `).run({
     qid: entry.qid,
