@@ -86,7 +86,7 @@ describe('scrape-probe: UA + rating sources mirror the app', () => {
   it('fetchable JSON/HTML targets have invariant validators (no 200-but-useless passes)', () => {
     const targets = buildProbeTargets(config.cinemas);
     const validating = targets.filter((t) => t.parseBody).map((t) => t.id);
-    // schedule endpoints + wikidata + RT root + cinevox horaires page
+    // schedule endpoints (mirrors boxOfficeApi.ts Phase 1) + wikidata + RT root
     expect(validating).toContain('cinema:mont-blanc');
     expect(validating).toContain('cinema:bonneville');
     expect(validating).toContain('cinema:chamonix');

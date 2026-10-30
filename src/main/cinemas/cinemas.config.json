@@ -40,8 +40,9 @@
       "city": "Chamonix",
       "color": "#a855f7",
       "adapter": {
-        "kind": "cinevox",
-        "baseUrl": "https://www.cinemavox-chamonix.com"
+        "kind": "boxofficeapi",
+        "baseUrl": "https://www.cinemavox-chamonix.com",
+        "theaterId": "P1406"
       }
     }
   ]
