@@ -153,6 +153,55 @@ export async function findByAllocineId(
   return { ...ids, allocineId };
 }
 
+/**
+ * Find an AlloCiné film ID (P1265) by title — the title→code FALLBACK for
+ * movies whose schedule doesn't carry a native Allociné id (custom cinemas).
+ *
+ * 2026-10: AlloCiné retired its server-rendered /recherche/?q= (410 Gone;
+ * the /rechercher/ replacement is a client-rendered shell behind their
+ * GraphQL API, which needs user JWTs we don't have). Wikidata, however,
+ * maintains P1265 (AlloCiné film ID) per film — so the resolution is now:
+ *   wbsearchentities (fr, en) on the cleaned title → wbgetentities on the
+ *   top candidates → first film with a P1265 claim whose French label is
+ *   coherent with the requested title.
+ * Same caching (in-session memo + SQLite ids_cache indirectly via the
+ * resolver) and title-cleaning rules as findByTitle.
+ */
+export async function findAllocineIdByTitle(
+  title: string,
+  expectedYear?: number,
+): Promise<string | null> {
+  const { cleaned: cleanedTitle, wasModified } = applyTitleRules(title);
+  const searchTitle = cleanedTitle.replace(/\s*:\s*/g, ' ').trim();
+  const originalSearchTitle = title.replace(/\s*:\s*/g, ' ').trim();
+
+  for (const attempt of [searchTitle, wasModified ? originalSearchTitle : null]) {
+    if (!attempt) continue;
+    for (const lang of ['fr', 'en'] as const) {
+      const candidates = await searchEntities(attempt, lang);
+      if (candidates.length === 0) continue;
+      const top = candidates.slice(0, 5);
+      const films = (await Promise.all(top.map((c) => getFilmIds(c.id)))).filter(
+        (x): x is WikidataIds => x !== null,
+      );
+      for (const f of films) {
+        if (!f.allocineId) continue;
+        if (!isCoherentTitle(attempt, f.title)) continue;
+        if (expectedYear !== undefined && !descriptionMentionsYear(f.description, expectedYear)) {
+          continue;
+        }
+        if (process.env.ARVE_DEBUG === '1') {
+          log.wikidata.info(
+            `[wikidata] findAllocineIdByTitle "${title}" → P1265 ${f.allocineId} (${f.qid})`,
+          );
+        }
+        return f.allocineId;
+      }
+    }
+  }
+  return null;
+}
+
 // ── Lookup by title (fallback) ────────────────────────────────────────────
 
 interface WbSearchResult {

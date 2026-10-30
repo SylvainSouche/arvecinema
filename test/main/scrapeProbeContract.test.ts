@@ -66,7 +66,7 @@ describe('scrape-probe: UA + rating sources mirror the app', () => {
     const ids = buildProbeTargets([]).map((t) => t.id);
     expect(ids).toEqual([
       'ratings:wikidata',
-      'ratings:allocine-search',
+      'ratings:allocine-id-registry',
       'ratings:allocine-fichefilm',
       'ratings:rottentomatoes',
       'ratings:imdb-title',
@@ -75,8 +75,10 @@ describe('scrape-probe: UA + rating sources mirror the app', () => {
     // Wikidata via api.php only — the app deliberately does NOT use SPARQL.
     expect(probeSource).toContain('api.php');
     expect(probeSource).not.toContain('query.wikidata.org');
-    // AlloCiné probe tracks the app's LIVE protocol endpoint…
-    expect(probeSource).toContain('/recherche/?q=');
+    // AlloCiné search retired (2026-10): the app's protocol is now a Wikidata
+    // P1265 lookup — pinned by the haswbstatement registry target…
+    expect(probeSource).toContain('haswbstatement:P1265=');
+    expect(probeSource).not.toContain('/recherche/?q=');
     // …and the ratings endpoint is pinned by its invariant (rating widget),
     // because a 200-but-widget-less page is how the cache got poisoned.
     expect(probeSource).toContain('fichefilm_gen_cfilm=');

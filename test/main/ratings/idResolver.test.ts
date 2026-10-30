@@ -239,10 +239,10 @@ describe('allocineIdFromMovie', () => {
     ).toBe('11111');
   });
 
-  it('returns undefined for an unsupported cinema (e.g. chamonix)', () => {
+  it('returns the schedule id for every boxofficeapi cinema (chamonix included since the 2026-10 migration)', () => {
     expect(
       allocineIdFromMovie(makeMovie({ title: 'T', cinemaId: 'chamonix', id: '12345' })),
-    ).toBeUndefined();
+    ).toBe('12345');
   });
 
   it('returns undefined when id is not numeric', () => {

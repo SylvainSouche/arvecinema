@@ -40,7 +40,16 @@ export function releaseYear(movie: Movie): number | undefined {
   return Number.isFinite(y) ? y : undefined;
 }
 
-const CINEMAS_WITH_REAL_ALLOCINE_IDS = new Set(['mont-blanc', 'cluses', 'bonneville']);
+// Cinemas whose boxofficeapi movie ids ARE AlloCiné film codes (the API
+// serves AlloCiné's id space — verified live: chamonix P1406 id 7124 =
+// "Terminator 2 : le Jugement Dernier" = Wikidata P1265 "7124").
+// 2026-10-30: chamonix joined (its site migrated to the boxofficeapi stack).
+const CINEMAS_WITH_REAL_ALLOCINE_IDS = new Set([
+  'mont-blanc',
+  'cluses',
+  'bonneville',
+  'chamonix',
+]);
 
 export function allocineIdFromMovie(movie: Movie): string | undefined {
   if (!CINEMAS_WITH_REAL_ALLOCINE_IDS.has(movie.cinemaId)) return undefined;

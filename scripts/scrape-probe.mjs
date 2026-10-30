@@ -27,7 +27,8 @@
 //   - cinevox: {baseUrl}/horaires/ HTML the cheerio scraper walks (probe =
 //     reachability + challenge-marker detection; deep parsing lives in the
 //     adapter fixture tests and e2e-live)
-//   - ratings: Wikidata api.php, AlloCiné search page, RT, IMDB title page
+//   - ratings: Wikidata api.php (entity + P1265 id registry), AlloCiné
+//     fichefilm pages, RT, IMDB title page
 //     (browser-only — plain-fetch challenge 403s are 'warn', not broken),
 //     IMDB datasets host
 //
@@ -223,15 +224,35 @@ export function buildProbeTargets(cinemas) {
       },
     },
     {
-      id: 'ratings:allocine-search',
+      id: 'ratings:allocine-id-registry',
       group: 'ratings',
-      // The app's CURRENT protocol endpoint (allocineClient.searchAllocineByTitle).
-      // NOTE: 2026-10: AlloCiné retired /recherche/?q= (410) — this probe
-      // target tracks the app's live protocol until it migrates to the new
-      // client-rendered flow. A 410 here = protocol regression = fail.
-      url: 'https://www.allocine.fr/recherche/?q=cinema',
+      // 2026-10: AlloCiné retired its server-rendered search (HTTP 410) and
+      // moved to a
+      // JWT'd GraphQL API — plain-HTTP search scraping is impossible. The
+      // app resolves AlloCiné codes through WIKIDATA's P1265 claim space
+      // (haswbstatement query) and boxofficeapi schedules (ids ARE AlloCiné
+      // codes); ratings still come from fichefilm pages (next target). This
+      // target pins the P1265 registry: the canary film (7124 = Terminator
+      // 2) must stay findable via the MediaWiki search API.
+      url:
+        'https://www.wikidata.org/w/api.php?action=query&list=search&srsearch=' +
+        encodeURIComponent('haswbstatement:P1265=7124') +
+        '&srnamespace=0&srlimit=5&format=json',
       headers: {},
       expect: 'ok',
+      parseBody: true,
+      validate: (bodyText) => {
+        try {
+          const j = JSON.parse(bodyText);
+          const hits = j?.query?.search?.length ?? 0;
+          if (hits === 0) {
+            return { state: 'broken', detail: 'haswbstatement:P1265 lookup returned 0 hits — id registry unusable' };
+          }
+          return { state: 'healthy', detail: `P1265 id registry responds (${hits} hit/s on the canary film)` };
+        } catch {
+          return { state: 'broken', detail: 'wikidata list=search no longer JSON' };
+        }
+      },
     },
     {
       id: 'ratings:allocine-fichefilm',

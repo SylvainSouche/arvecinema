@@ -7,6 +7,7 @@ import fs from 'fs';
 import type { RatingSource, ResolvedIds, RatingFetchResult } from './RatingSource';
 import type { Movie } from '../../shared/types';
 import { log } from './moduleLoggers';
+import { findAllocineIdByTitle } from './wikidataClient';
 
 // ──────────────────────────────────────────────────────────────────────────
 // AlloCiné scraper — French press + audience ratings.
@@ -158,24 +159,24 @@ export async function fetchAllocineRatings(cfilmId: string): Promise<AllocineRes
   }
 }
 
-export async function searchAllocineByTitle(title: string): Promise<string | null> {
-  const url = `${ALLOCINE_BASE}/recherche/?q=${encodeURIComponent(title)}`;
-
+/**
+ * Resolve an AlloCiné film code by title.
+ *
+ * 2026-10-20: AlloCiné retired its server-rendered search `/recherche/?q=`
+ * (410 Gone) and replaced it with a client-rendered `/rechercher/` shell
+ * backed by their user-JWT'd GraphQL API — plain-HTTP scraping of that flow
+ * is not viable (see CHANGELOG 2026-10-27 data appendix probe diagnostics).
+ * The resolution moved to WIKIDATA: films carry claim P1265 (AlloCiné film
+ * ID), and builtin boxofficeapi cinemas carry Allociné codes DIRECTLY in
+ * their schedules (idResolver), so this title fallback only serves movies
+ * without a schedule-derived id (custom cinemas).
+ */
+export async function searchAllocineByTitle(
+  title: string,
+  expectedYear?: number,
+): Promise<string | null> {
   try {
-    // Try pooledFetch first (fast, small), fall back to browserFetch if Cloudflare
-    let html = await pooledFetch(url, { headers: HEADERS });
-
-    if (html.includes('Just a moment...') || html.includes('cf-challenge') || html.length < 200) {
-      html = await browserFetch(url, { headers: HEADERS });
-    }
-
-    if (html.includes('Just a moment...') || html.includes('cf-challenge')) {
-      log.allocine.warn('[allocine] Cloudflare challenge on search');
-      return null;
-    }
-
-    const m = html.match(/fichefilm_gen_cfilm=(\d+)/);
-    return m ? m[1] : null;
+    return await findAllocineIdByTitle(title, expectedYear);
   } catch {
     return null;
   }
@@ -267,7 +268,8 @@ export const allocineSource: RatingSource = {
   async fetchRating(ids: ResolvedIds, movie: Movie): Promise<RatingFetchResult | null> {
     let acId = ids.allocineId;
     if (!acId) {
-      acId = (await searchAllocineByTitle(movie.title)) ?? undefined;
+      const year = movie.release ? Number(String(movie.release).slice(0, 4)) : undefined;
+      acId = (await searchAllocineByTitle(movie.title, year)) ?? undefined;
     }
     if (!acId) {
       return {
